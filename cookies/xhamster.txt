@@ -1,0 +1,22 @@
+# Netscape HTTP Cookie File
+# https://curl.haxx.se/rfc/cookie_spec.html
+# This is a generated file! Do not edit.
+
+.xhamster.com	TRUE	/	TRUE	1762109215	stats_src_last	google.com
+.xhamster.com	TRUE	/	FALSE	1793559084	cookie_accept_v2	%7B%22e%22%3A1%2C%22f%22%3A1%2C%22t%22%3A1%2C%22a%22%3A1%7D
+.xhamster.com	TRUE	/	FALSE	1793559065	ff_thumb_offset	3
+.xhamster.com	TRUE	/	FALSE	1762023965	recs_show_time	1762023064
+.xhamster.com	TRUE	/	FALSE	1793559065	moments_listing_ad_offset	3
+.xhamster.com	TRUE	/	TRUE	1764615084	_cfg	0332b0d3f2201599b901d3b40549770f
+.xhamster.com	TRUE	/	FALSE	0	ss	%7B%22domainAccessibility%22%3Atrue%7D
+xhamster.com	FALSE	/	FALSE	0	cookie_accept	1
+xhamster.com	FALSE	/	FALSE	0	ts_popunder	true
+.xhamster.com	TRUE	/	FALSE	1793558822	settings	eyJpc1dlYm1TdXBwb3J0ZWQiOnRydWUsImlzV2VicFN1cHBvcnRlZCI6dHJ1ZSwiZXh0RGV0ZWN0ZWRWMiI6ZmFsc2UsImV4cGlyZXMiOnsiZXh0RGV0ZWN0ZWRWMiI6MTc2MjAyMjgyMn19
+.xhamster.com	TRUE	/	FALSE	1793558817	parental-control	yes
+xhamster.com	FALSE	/	FALSE	1777574822	g_state	{"i_l":1,"i_ll":1762022822359,"i_b":"ptIQy5pKa8ttj3phg7Per0ZuBVoUNjCBoeFWcdls+Jc","i_p":1762030020247}
+.xhamster.com	TRUE	/	TRUE	1793558863	_id	a34f9d8ebcbffb9694e25b0be23ad3722f473260
+.xhamster.com	TRUE	/	FALSE	1796582863	x_tgt	%7B%22login%22%3A%2201-11-2025%22%7D
+.xhamster.com	TRUE	/	FALSE	1793559091	UID	268988078
+.xhamster.com	TRUE	/	FALSE	1762627884	x_viewes	%5B26800730%5D
+.xhamster.com	TRUE	/	FALSE	1764615084	x_content_preference_index	straight
+.xhamster.com	TRUE	/	FALSE	1764615085	h_v4_straight	%7B%22v%22%3A%5B%5D%2C%22l%22%3A%5B%5D%2C%22f%22%3A%5B%5D%2C%22pv%22%3A%5B26800730%5D%7D
