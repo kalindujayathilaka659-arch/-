@@ -1,10 +1,11 @@
 const { cmd } = require("../command");
 const fs = require("fs");
 const path = require("path");
+const mime = require("mime-types");
 
-// temp folder
-const DOWNLOAD_DIR = path.join(__dirname, "../temp");
-if (!fs.existsSync(DOWNLOAD_DIR)) fs.mkdirSync(DOWNLOAD_DIR);
+// use only temp folder that already exists in project root
+const TEMP_DIR = path.join(process.cwd(), "temp");
+if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR);
 
 cmd(
   {
@@ -22,7 +23,6 @@ cmd(
     let progressMsg = await reply("🧲 *Starting torrent download...*");
 
     try {
-      // ⬇️ dynamic import to fix ESM error
       const WebTorrent = (await import("webtorrent")).default;
       const client = new WebTorrent();
 
@@ -40,24 +40,21 @@ cmd(
                 `📂 *Name:* ${torrent.name}\n` +
                 `📊 *Progress:* ${percent}%\n` +
                 `⚡ *Speed:* ${speed} MB/s\n` +
-                `⏳ *ETA:* ${eta} sec`,
+                `⏳ *ETA:* ${eta}s`,
               edit: progressMsg.key,
             },
             { quoted: mek }
           );
         };
 
-        // ⏱ update progress every second
-        const interval = setInterval(updateProgress, 500);
+        const interval = setInterval(updateProgress, 1000);
 
         torrent.on("done", async () => {
           clearInterval(interval);
 
-          // pick biggest file
           const mainFile = torrent.files.sort((a, b) => b.length - a.length)[0];
-          const filePath = path.join(DOWNLOAD_DIR, mainFile.name);
+          const filePath = path.join(TEMP_DIR, mainFile.name);
 
-          // write file to disk
           await new Promise((resolve, reject) => {
             mainFile.createReadStream()
               .pipe(fs.createWriteStream(filePath))
@@ -68,10 +65,11 @@ cmd(
           const fileSize = fs.statSync(filePath).size;
           if (fileSize > 2 * 1024 * 1024 * 1024) {
             fs.unlinkSync(filePath);
-            return reply("❌ *File too large.* Max 2GB supported.");
+            return reply("❌ *File too large.* Max supported size: 2GB");
           }
 
-          // final progress message
+          const fileMime = mime.lookup(filePath) || "application/octet-stream";
+
           await robin.sendMessage(
             from,
             {
@@ -81,13 +79,12 @@ cmd(
             { quoted: mek }
           );
 
-          // 📌 SEND WITH ORIGINAL NAME + EXTENSION
           await robin.sendMessage(
             from,
             {
               document: fs.readFileSync(filePath),
-              fileName: path.basename(filePath), // ⬅️ FIXED: keeps original extension
-              mimetype: "application/octet-stream",
+              fileName: path.basename(filePath),
+              mimetype: fileMime,
             },
             { quoted: mek }
           );
@@ -96,8 +93,8 @@ cmd(
         });
       });
     } catch (err) {
-      console.log(err);
-      reply("❌ *Error:* " + err.message);
+      console.error(err);
+      reply("❌ Error: " + err.message);
     }
   }
 );
