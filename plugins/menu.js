@@ -77,6 +77,7 @@ cmd(
 | _*DOWNLOAD COMMANDS*_ |
     👻 .mega <mrga.nz url>
     👻 .download <direct download url>
+    👻 .torrent <torrent magnet url>
     
 | _*SOCIAL MEDIA DOWNLOAD COMMANDS*_ |
     👻 .song <song name>
