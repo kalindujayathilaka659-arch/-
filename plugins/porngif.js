@@ -25,7 +25,7 @@ cmd(
       const query =
         typeof q === "string" && q.trim().length
           ? q.trim()
-          : "random";
+          : "ass","big boobs";
 
       const keywords = query.toLowerCase().split(/\s+/);
 
