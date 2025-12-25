@@ -47,7 +47,7 @@ cmd(
           );
         };
 
-        const interval = setInterval(updateProgress, 1000);
+        const interval = setInterval(updateProgress, 1500);
 
         torrent.on("done", async () => {
           clearInterval(interval);
