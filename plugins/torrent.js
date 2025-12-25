@@ -1,86 +1,103 @@
 const { cmd } = require("../command");
-const WebTorrent = require("webtorrent");
 const fs = require("fs");
 const path = require("path");
 
+// temp folder
+const DOWNLOAD_DIR = path.join(__dirname, "../temp");
+if (!fs.existsSync(DOWNLOAD_DIR)) fs.mkdirSync(DOWNLOAD_DIR);
+
 cmd(
   {
-    pattern: "magnet",
+    pattern: "torrent",
     react: "🧲",
-    desc: "Download torrent files using magnet link",
+    desc: "Download file using magnet link (supports up to 2GB)",
     category: "download",
     filename: __filename,
   },
   async (robin, mek, m, { from, q, reply }) => {
+    if (!q || !q.startsWith("magnet:")) {
+      return reply("❌ *Send a valid magnet link*\n\nUsage: `.torrent <magnet>`");
+    }
+
+    let progressMsg = await reply("🧲 *Starting torrent download...*");
+
     try {
-      if (!q || !q.startsWith("magnet:?")) {
-        return reply("❌ Send a valid magnet link.\n\nExample:\n*magnet magnet:?xt=urn:btih:XXXX*");
-      }
-
-      const downloadDir = "./torrents";
-      if (!fs.existsSync(downloadDir)) fs.mkdirSync(downloadDir);
-
+      // ⬇️ dynamic import to fix ESM error
+      const WebTorrent = (await import("webtorrent")).default;
       const client = new WebTorrent();
-      await reply("🔗 Adding torrent...\n⏳ Fetching metadata...");
 
-      client.add(q, { path: downloadDir }, async (torrent) => {
-        const totalMB = (torrent.length / (1024 ** 2)).toFixed(2);
-        let lastEdit = Date.now();
-
-        let statusMsg = await robin.sendMessage(
-          from,
-          { text: `📥 *Downloading torrent...*\n\n🧲 *Name:* ${torrent.name}\n📦 *Size:* ${totalMB} MB\n⏳ *Starting...*` },
-          { quoted: mek }
-        );
-
-        const interval = setInterval(async () => {
-          try {
-            const downloadedMB = (torrent.downloaded / (1024 ** 2)).toFixed(2);
-            const percent = (torrent.progress * 100).toFixed(1);
-            const speed = (torrent.downloadSpeed / (1024 ** 2)).toFixed(2);
-            const eta = (torrent.timeRemaining / 1000).toFixed(0);
-
-            if (Date.now() - lastEdit >= 2500) { // update every 2.5s
-              lastEdit = Date.now();
-              await robin.sendMessage(
-                from,
-                {
-                  text:
-                    `🧲 *TORRENT DOWNLOAD*\n\n` +
-                    `📁 *File:* ${torrent.name}\n` +
-                    `⚡ *Speed:* ${speed} MB/s\n` +
-                    `📊 *Progress:* ${percent}%\n` +
-                    `⬇ *Downloaded:* ${downloadedMB}/${totalMB} MB\n` +
-                    `⏳ *ETA:* ${eta} sec`,
-                  edit: statusMsg.key,
-                }
-              ).catch(() => {});
-            }
-          } catch (e) {}
-        }, 1000);
-
-        torrent.on("done", async () => {
-          clearInterval(interval);
+      client.add(q, async (torrent) => {
+        const updateProgress = async () => {
+          const percent = Math.round(torrent.progress * 100);
+          const speed = (torrent.downloadSpeed / 1024 / 1024).toFixed(2);
+          const eta = Math.round(torrent.timeRemaining / 1000);
 
           await robin.sendMessage(
             from,
             {
               text:
-                `🎉 *Download Complete!*\n\n` +
-                `🧲 *Name:* ${torrent.name}\n` +
-                `📦 *Size:* ${totalMB} MB\n` +
-                `📁 *Saved to:* ${path.resolve(downloadDir)}`
+                `🧲 *Torrent Downloading...*\n\n` +
+                `📂 *Name:* ${torrent.name}\n` +
+                `📊 *Progress:* ${percent}%\n` +
+                `⚡ *Speed:* ${speed} MB/s\n` +
+                `⏳ *ETA:* ${eta} sec`,
+              edit: progressMsg.key,
+            },
+            { quoted: mek }
+          );
+        };
+
+        // ⏱ update progress every second
+        const interval = setInterval(updateProgress, 500);
+
+        torrent.on("done", async () => {
+          clearInterval(interval);
+
+          // pick biggest file
+          const mainFile = torrent.files.sort((a, b) => b.length - a.length)[0];
+          const filePath = path.join(DOWNLOAD_DIR, mainFile.name);
+
+          // write file to disk
+          await new Promise((resolve, reject) => {
+            mainFile.createReadStream()
+              .pipe(fs.createWriteStream(filePath))
+              .on("finish", resolve)
+              .on("error", reject);
+          });
+
+          const fileSize = fs.statSync(filePath).size;
+          if (fileSize > 2 * 1024 * 1024 * 1024) {
+            fs.unlinkSync(filePath);
+            return reply("❌ *File too large.* Max 2GB supported.");
+          }
+
+          // final progress message
+          await robin.sendMessage(
+            from,
+            {
+              text: `🎉 *Download Completed:* ${mainFile.name}`,
+              edit: progressMsg.key,
             },
             { quoted: mek }
           );
 
-          client.destroy();
+          // 📌 SEND WITH ORIGINAL NAME + EXTENSION
+          await robin.sendMessage(
+            from,
+            {
+              document: fs.readFileSync(filePath),
+              fileName: path.basename(filePath), // ⬅️ FIXED: keeps original extension
+              mimetype: "application/octet-stream",
+            },
+            { quoted: mek }
+          );
+
+          fs.unlinkSync(filePath);
         });
       });
-
     } catch (err) {
-      console.log("Torrent error:", err);
-      reply("❌ Failed to process torrent.\n" + err.message);
+      console.log(err);
+      reply("❌ *Error:* " + err.message);
     }
   }
 );
