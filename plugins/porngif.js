@@ -25,7 +25,7 @@ cmd(
       const query =
         typeof q === "string" && q.trim().length
           ? q.trim()
-          : "ass","big boobs";
+          : "ass";
 
       const keywords = query.toLowerCase().split(/\s+/);
 
