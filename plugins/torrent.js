@@ -1,11 +1,11 @@
 const { cmd } = require("../command");
 const fs = require("fs");
 const path = require("path");
-const mime = require("mime-types");
+const mime = require("mime-types"); // <-- NEW (npm i mime-types)
 
-// use only temp folder that already exists in project root
-const TEMP_DIR = path.join(process.cwd(), "temp");
-if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR);
+const DOWNLOAD_DIR = path.join(__dirname, "../temp");
+
+if (!fs.existsSync(DOWNLOAD_DIR)) fs.mkdirSync(DOWNLOAD_DIR);
 
 cmd(
   {
@@ -40,21 +40,23 @@ cmd(
                 `📂 *Name:* ${torrent.name}\n` +
                 `📊 *Progress:* ${percent}%\n` +
                 `⚡ *Speed:* ${speed} MB/s\n` +
-                `⏳ *ETA:* ${eta}s`,
+                `⏳ *ETA:* ${eta} sec`,
               edit: progressMsg.key,
             },
             { quoted: mek }
           );
         };
 
-        const interval = setInterval(updateProgress, 2000);
+        const interval = setInterval(updateProgress, 500);
 
         torrent.on("done", async () => {
           clearInterval(interval);
 
+          // pick biggest file
           const mainFile = torrent.files.sort((a, b) => b.length - a.length)[0];
-          const filePath = path.join(TEMP_DIR, mainFile.name);
+          const filePath = path.join(DOWNLOAD_DIR, mainFile.name);
 
+          // write file to disk
           await new Promise((resolve, reject) => {
             mainFile.createReadStream()
               .pipe(fs.createWriteStream(filePath))
@@ -65,10 +67,11 @@ cmd(
           const fileSize = fs.statSync(filePath).size;
           if (fileSize > 2 * 1024 * 1024 * 1024) {
             fs.unlinkSync(filePath);
-            return reply("❌ *File too large.* Max supported size: 2GB");
+            return reply("❌ *File too large.* Max 2GB supported.");
           }
 
-          const fileMime = mime.lookup(filePath) || "application/octet-stream";
+          // 🔥 auto detect mimetype (fixes .bin on whatsapp mobile)
+          const detectedMime = mime.lookup(mainFile.name) || "application/octet-stream";
 
           await robin.sendMessage(
             from,
@@ -79,12 +82,13 @@ cmd(
             { quoted: mek }
           );
 
+          // 📌 SEND WITH ORIGINAL NAME + CORRECT MIMETYPE
           await robin.sendMessage(
             from,
             {
               document: fs.readFileSync(filePath),
               fileName: path.basename(filePath),
-              mimetype: fileMime,
+              mimetype: detectedMime, // <--- FIXED HERE
             },
             { quoted: mek }
           );
@@ -93,8 +97,8 @@ cmd(
         });
       });
     } catch (err) {
-      console.error(err);
-      reply("❌ Error: " + err.message);
+      console.log(err);
+      reply("❌ *Error:* " + err.message);
     }
   }
 );
