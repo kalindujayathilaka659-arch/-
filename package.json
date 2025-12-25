@@ -59,6 +59,7 @@
     "tiktok-scraper-ts": "^1.4.1",
     "tmp": "^0.2.1",
     "wa-sticker-formatter": "^4.4.4",
+    "webtorrent": "^2.8.5",
     "xml2js": "^0.6.2",
     "youtube-mp3-downloader": "^0.7.11",
     "yt-dlp-exec": "^1.0.2",
