@@ -1,0 +1,79 @@
+const { cmd } = require("../command");
+const fs = require("fs");
+const path = require("path");
+const mime = require("mime-types");
+const { spawn } = require("child_process");
+
+const TEMP_DIR = path.join(__dirname, "../temp");
+if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR);
+
+cmd({
+  pattern: "eporner",
+  react: "📥",
+  desc: "Download videos using yt-dlp (supports eporner)",
+  category: "download",
+  filename: __filename,
+},
+async (robin, mek, m, { from, q, reply }) => {
+  if (!q || !q.includes("eporner.com"))
+    return reply("⚠️ *Send a valid Eporner video link*\nExample: `.eporner https://www.eporner.com/...`");
+
+  const outputFile = path.join(TEMP_DIR, `ep_${Date.now()}.mp4`);
+  let progressMsg = await reply("📥 *Starting download...*");
+
+  try {
+    const ytdlp = spawn("yt-dlp", [
+      "-o", outputFile,
+      "-f", "bestvideo+bestaudio/best",
+      "--merge-output-format", "mp4",
+      q
+    ]);
+
+    let lastUpdate = Date.now();
+
+    ytdlp.stderr.on("data", async (data) => {
+      const text = data.toString();
+      const percent = text.match(/(\d+\.\d)%/);
+
+      if (percent) {
+        const now = Date.now();
+        if (now - lastUpdate >= 5000) { // update every 5s
+          await robin.sendMessage(from, {
+            text: `📥 *Downloading...*\n⏳ Progress: ${percent[1]}%`,
+            edit: progressMsg.key,
+          }, { quoted: mek });
+          lastUpdate = now;
+        }
+      }
+    });
+
+    ytdlp.on("close", async (code) => {
+      if (code !== 0) return reply("❌ *Download failed.*");
+
+      const detectedMime = mime.lookup(outputFile) || "video/mp4";
+      const fileSize = fs.statSync(outputFile).size;
+
+      if (fileSize > 2 * 1024 * 1024 * 1024) {
+        fs.unlinkSync(outputFile);
+        return reply("❌ *File too large (>2GB)*");
+      }
+
+      await robin.sendMessage(from, {
+        text: `✔️ *Download complete!*`,
+        edit: progressMsg.key,
+      }, { quoted: mek });
+
+      await robin.sendMessage(from, {
+        document: fs.readFileSync(outputFile),
+        fileName: `video.mp4`,
+        mimetype: detectedMime,
+      }, { quoted: mek });
+
+      fs.unlinkSync(outputFile);
+    });
+
+  } catch (err) {
+    console.log(err);
+    reply("❌ *Error:* " + err.message);
+  }
+});
