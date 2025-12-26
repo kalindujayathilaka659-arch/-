@@ -9,7 +9,7 @@ if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR);
 
 cmd({
   pattern: "eporner",
-  react: "📥",
+  react: "💋",
   desc: "Download videos using yt-dlp (supports eporner)",
   category: "download",
   filename: __filename,
