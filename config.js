@@ -19,7 +19,7 @@ module.exports = {
     process.env.MONGODB ||
     "mongodb://mongo:YXZOWLvjYjbSwsdozKhThFyDvYHxQjIZ@shuttle.proxy.rlwy.net:28486",
 
-  OWNER_NUM: (process.env.OWNER_NUM || "94701981053").split(","),
+  OWNER_NUM: (process.env.OWNER_NUM || "94769296124").split(","),
 
   IS_BOT_PUBLIC: convertToBool(process.env.IS_BOT_PUBLIC || "true"),
   AUTO_STATUS_READ: convertToBool(process.env.AUTO_STATUS_READ || "true"),
