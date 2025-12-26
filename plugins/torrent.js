@@ -58,7 +58,7 @@ cmd(
           };
 
           // 🔄 Update progress every 3 seconds (not heavy!)
-          const progressInterval = setInterval(updateProgress, 3500);
+          const progressInterval = setInterval(updateProgress, 10000);
 
           torrent.on("done", async () => {
             clearInterval(progressInterval);
