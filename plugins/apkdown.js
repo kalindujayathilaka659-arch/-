@@ -1,10 +1,12 @@
 const { cmd } = require("../command");
+const { isOwner } = require("../lib/auth");
 
 const MAX_WORDS = 50000; // 🔒 HARD FIXED
 
 cmd(
   {
     pattern: "wordlist",
+    ownerOnly: true,
     react: "📄",
     desc: "Generate 50,000-word wordlist (direct join only)",
     category: "tools",
@@ -79,3 +81,4 @@ cmd(
     }
   }
 );
+
