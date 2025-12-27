@@ -1,5 +1,6 @@
 const { cmd } = require("../command");
 const os = require("os"); // for CPU info
+const { isOwner } = require("../lib/auth");
 
 function formatUptime(seconds) {
   const h = Math.floor(seconds / 3600);
