@@ -3,6 +3,7 @@ const { execFile } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 const ffmpegPath = require("ffmpeg-static");
+const { isOwner } = require("../lib/auth");
 
 const cookiesPath = path.resolve(__dirname, "../cookies/pornhubcookies.txt");
 const tempDir = path.resolve(__dirname, "../temp");
@@ -24,6 +25,7 @@ cmd(
   {
     pattern: "pornhub",
     alias: ["ph", "pornhubdl"],
+    ownerOnly: true,
     react: "💦",
     desc: "Pornhub downloader (thumbnail first, then video)",
     category: "download",
@@ -166,4 +168,5 @@ cmd(
     }
   }
 );
+
 
