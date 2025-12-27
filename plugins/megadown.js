@@ -3,6 +3,7 @@ const { File } = require("megajs");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+const { isOwner } = require("../lib/auth");
 
 /* ---------- HELPERS ---------- */
 function formatSize(bytes) {
@@ -15,6 +16,7 @@ function formatSize(bytes) {
 cmd(
   {
     pattern: "mega",
+    ownerOnly: true,
     react: "📦",
     desc: "MEGA ultra-fast download (2GB, live % edit)",
     filename: __filename,
