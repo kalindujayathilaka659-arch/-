@@ -1,9 +1,11 @@
 const { cmd } = require("../command");
 const axios = require("axios");
+const { isOwner } = require("../lib/auth");
 
 cmd({
   pattern: "alive",
   alias: ["bot", "ghost"],
+  ownerOnly: true,
   react: "👻",
   desc: "Check if the bot is online (image + voice message + audio from URL)",
   category: "main",
