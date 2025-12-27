@@ -1,10 +1,12 @@
 const { cmd } = require("../command");
 const getFbVideoInfo = require("@xaviabot/fb-downloader");
+const { isOwner } = require("../lib/auth");
 
 cmd(
   {
     pattern: "fb",
     alias: ["facebook"],
+    ownerOnly: true,
     react: "💙",
     desc: "Download Facebook Video (1080p preferred, fallback to SD)",
     category: "download",
