@@ -3,6 +3,7 @@ const { execFile } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 const ffmpegPath = require("ffmpeg-static");
+const { isOwner } = require("../lib/auth");
 
 /* ---------- helpers ---------- */
 function findFile(dir, ext) {
@@ -28,6 +29,7 @@ function formatDuration(sec) {
 cmd(
   {
     pattern: "xhamster",
+    ownerOnly: true,
     react: "🎥",
     desc: "Download XHamster video (thumbnail + metadata first)",
     category: "nsfw",
