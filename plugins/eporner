@@ -115,7 +115,7 @@ async (bot, msg, m, { from, q, reply }) => {
       }, { quoted: msg });
 
       fs.unlinkSync(outputFile);
-      await reply("✔️ *Video sent successfully!*");
+      await reply("✅ *Video sent successfully!*");
     });
 
   } catch (err) {
