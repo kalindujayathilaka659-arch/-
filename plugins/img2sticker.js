@@ -10,50 +10,47 @@ cmd(
   {
     pattern: "sticker",
     react: "🧩",
-    desc: "Convert image, GIF, or short video (<20s) to WhatsApp-safe sticker",
+    desc: "Convert image, GIF, or short video (<20s) to sticker",
     category: "utility",
     filename: __filename,
   },
   async (robin, mek, m, { from, quoted, reply }) => {
     try {
-      if (!quoted)
-        return reply("🖼️ Reply to an image, GIF, or video (<20s)");
+      if (!quoted) return reply("🖼️ Reply to an image, GIF, or video < 20s");
 
       const isImage = quoted.imageMessage;
       const isVideo = quoted.videoMessage;
 
-      if (!isImage && !isVideo)
-        return reply("❌ Reply to a valid image or video.");
+      if (!isImage && !isVideo) {
+        return reply("❌ Reply to a valid image or video (under 20s).");
+      }
 
       const duration = isVideo ? quoted.videoMessage.seconds || 0 : 0;
-      if (isVideo && duration > 20)
-        return reply("❌ Video too long. Max 20 seconds.");
+      if (isVideo && duration > 20) {
+        return reply("❌ Video is too long. Max allowed is 20 seconds.");
+      }
 
-      const inputExt = isVideo ? ".mp4" : ".jpg";
-      const tmpInput = path.join(tmpdir(), `stk_in_${Date.now()}${inputExt}`);
-      const tmpOutput = path.join(tmpdir(), `stk_out_${Date.now()}.webp`);
+      const ext = isVideo ? ".mp4" : ".jpg";
+      const tmpInput = path.join(tmpdir(), `input_${Date.now()}${ext}`);
+      const tmpOutput = path.join(tmpdir(), `output_${Date.now()}.webp`);
 
-      const buffer = await downloadMediaMessage(
-        quoted,
-        isVideo ? "video" : "image"
-      );
+      const buffer = await downloadMediaMessage(quoted, isVideo ? "video" : "stickerImage");
       if (!buffer) return reply("❌ Failed to download media.");
 
       await fs.writeFile(tmpInput, buffer);
 
-      /* ---------- VIDEO → ANIMATED STICKER (MOBILE SAFE) ---------- */
       if (isVideo) {
         await new Promise((resolve, reject) => {
           ffmpeg(tmpInput)
             .outputOptions([
-              "-vf",
-              "scale=512:512:force_original_aspect_ratio=decrease,fps=15",
-              "-c:v", "libwebp",
+              "-vcodec", "libwebp",
+              "-vf", "scale=512:512:force_original_aspect_ratio=decrease,fps=15,format=rgba",
+              "-lossless", "1",
+              "-preset", "default",
               "-loop", "0",
               "-an",
-              "-preset", "default",
-              "-compression_level", "6",
               "-vsync", "0",
+              "-ss", "0",
               "-t", "20",
             ])
             .toFormat("webp")
@@ -61,18 +58,17 @@ cmd(
             .on("end", resolve)
             .on("error", reject);
         });
-      } 
-      /* ---------- IMAGE → STATIC STICKER ---------- */
-      else {
+      } else {
+        // Convert image to webp for better sticker quality and no white dots
         await new Promise((resolve, reject) => {
           ffmpeg(tmpInput)
             .outputOptions([
-              "-vf",
-              "scale=512:512:force_original_aspect_ratio=decrease",
-              "-c:v", "libwebp",
+              "-vcodec", "libwebp",
+              "-vf", "scale=512:512:force_original_aspect_ratio=decrease,format=rgba",
               "-lossless", "1",
               "-preset", "default",
               "-an",
+              "-vsync", "0",
             ])
             .toFormat("webp")
             .save(tmpOutput)
@@ -84,22 +80,19 @@ cmd(
       const sticker = new Sticker(fs.readFileSync(tmpOutput), {
         pack: "GHOST-MD",
         author: "Sticker Maker",
-        type: isVideo ? StickerTypes.FULL : StickerTypes.DEFAULT,
+        type: StickerTypes.FULL,
         quality: 100,
       });
 
-      await robin.sendMessage(
-        from,
-        { sticker: await sticker.toBuffer() },
-        { quoted: mek }
-      );
+      const stickerBuffer = await sticker.toBuffer();
+      await robin.sendMessage(from, { sticker: stickerBuffer }, { quoted: mek });
 
+      // Cleanup
       await fs.unlink(tmpInput);
       await fs.unlink(tmpOutput);
-
     } catch (e) {
       console.error("❌ Sticker error:", e);
-      reply("❌ Failed to create sticker.");
+      reply(`❌ Error: ${e.message || "Something went wrong."}`);
     }
   }
 );
