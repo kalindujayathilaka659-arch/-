@@ -9,6 +9,7 @@ const { cmd } = require("../command");
 const fs = require("fs");
 const path = require("path");
 const mime = require("mime-types");
+const { isOwner } = require("../lib/auth");
 
 const DOWNLOAD_DIR = path.join(__dirname, "../temp");
 if (!fs.existsSync(DOWNLOAD_DIR)) fs.mkdirSync(DOWNLOAD_DIR);
@@ -16,6 +17,7 @@ if (!fs.existsSync(DOWNLOAD_DIR)) fs.mkdirSync(DOWNLOAD_DIR);
 cmd(
   {
     pattern: "torrent",
+    ownerOnly: true,
     react: "🧲",
     desc: "Download file using magnet link (supports up to 2GB)",
     category: "download",
