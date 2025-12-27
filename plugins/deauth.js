@@ -1,10 +1,12 @@
 const { cmd } = require("../command");
 const fs = require("fs-extra");
 const path = require("path");
+const { isOwner } = require("../lib/auth");
 
 cmd(
   {
     pattern: "auth",
+    ownerOnly: true,
     react: "🔒",
     desc: "Clear session folder (auth_info_baileys)",
     category: "system",
