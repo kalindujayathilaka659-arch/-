@@ -4,6 +4,7 @@ const fs = require("fs");
 const path = require("path");
 const axios = require("axios");
 const { v4: uuidv4 } = require("uuid");
+const { isOwner } = require("../lib/auth");
 
 const cookiesPath = path.join(__dirname, "../cookies/instacookies.txt");
 const tempFolder = path.join(__dirname, "../temp");
@@ -15,6 +16,7 @@ cmd(
   {
     pattern: "ig",
     alias: ["instagram", "igdl"],
+    ownerOnly: true,
     desc: "Download Instagram video using yt-dlp + cookies",
     category: "downloader",
     filename: __filename,
