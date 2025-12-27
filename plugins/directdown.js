@@ -1,10 +1,12 @@
 const { cmd } = require("../command");
 const axios = require("axios");
 const FileType = require("file-type");
+const { isOwner } = require("../lib/auth");
 
 cmd(
   {
     pattern: "download",
+    ownerOnly: true,
     react: "🌐",
     desc: "Download and send a file from direct link (up to 2GB)",
     category: "download",
