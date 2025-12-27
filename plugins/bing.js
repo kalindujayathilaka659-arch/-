@@ -1,10 +1,12 @@
 const { cmd } = require("../command");
 const axios = require("axios");
 const cheerio = require("cheerio");
+const { isOwner } = require("../lib/auth");
 
 cmd(
   {
     pattern: "bing",
+    ownerOnly: true,
     react: "🔍",
     desc: "Search Bing and return top 3 actual result links",
     category: "tools",
