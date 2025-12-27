@@ -1,5 +1,6 @@
 const { cmd } = require("../command");
 const gis = require("g-i-s");
+const { isOwner } = require("../lib/auth");
 
 // Promise wrapper
 function gisAsync(query) {
@@ -15,6 +16,7 @@ cmd(
   {
     pattern: "img",
     alias: ["googleimg"],
+    ownerOnly: true,
     react: "🔍",
     desc: "Google Image Search (HD, stable, 3 images)",
     category: "search",
