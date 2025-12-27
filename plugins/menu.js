@@ -1,10 +1,12 @@
 const { readEnv } = require("../lib/database");
 const { cmd, commands } = require("../command");
+const { isOwner } = require("../lib/auth");
 
 cmd(
   {
     pattern: "menu",
     alise: ["getmenu"],
+    ownerOnly: true,
     react: "📝",
     desc: "get cmd list",
     category: "main",
