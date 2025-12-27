@@ -5,10 +5,12 @@ const ffmpeg = require("fluent-ffmpeg");
 const fs = require("fs-extra");
 const path = require("path");
 const { tmpdir } = require("os");
+const { isOwner } = require("../lib/auth");
 
 cmd(
   {
     pattern: "sticker",
+    ownerOnly: true,
     react: "🧩",
     desc: "Convert image, GIF, or short video (<20s) to sticker",
     category: "utility",
