@@ -1,9 +1,11 @@
 const { cmd } = require("../command");
 const axios = require("axios");
+const { isOwner } = require("../lib/auth");
 
 cmd(
   {
     pattern: "nsfwimg",
+    ownerOnly: true,
     react: "🍑",
     desc: "Get 3 NSFW images (Danbooru – stable)",
     category: "nsfw",
