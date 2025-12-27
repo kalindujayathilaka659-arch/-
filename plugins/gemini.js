@@ -1,6 +1,7 @@
 const { cmd } = require("../command");
 const axios = require("axios");
 const config = require("../config");
+const { isOwner } = require("../lib/auth");
 
 /* ---------- GEMINI CONFIG ---------- */
 if (!config.GEMINI_API_KEY) {
@@ -16,6 +17,7 @@ cmd(
   {
     pattern: "ai",
     alias: ["gemini", "gpt", "chatgpt"],
+    ownerOnly: true,
     react: "🤖",
     desc: "Ask anything to Google Gemini AI",
     category: "ai",
