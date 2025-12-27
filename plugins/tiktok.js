@@ -1,9 +1,11 @@
 const { cmd } = require("../command");
 const axios = require("axios");
+const { isOwner } = require("../lib/auth");
 
 cmd(
   {
     pattern: "tiktok",
+    ownerOnly: true,
     react: "🎶",
     desc: "Download TikTok video without watermark",
     category: "download",
