@@ -35,6 +35,7 @@ function getCpuUsage() {
 cmd(
   {
     pattern: "ping",
+    ownerOnly: true,
     desc: "Ping, uptime, RAM, and CPU usage (with image)",
     react: "🏓",
     category: "test",
