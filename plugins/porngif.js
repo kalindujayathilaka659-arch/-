@@ -3,6 +3,7 @@ const axios = require("axios");
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
+const { isOwner } = require("../lib/auth");
 
 const ffmpeg = require("fluent-ffmpeg");
 const ffmpegInstaller = require("@ffmpeg-installer/ffmpeg");
@@ -14,6 +15,7 @@ const sentIds = new Set();
 cmd(
   {
     pattern: "pornclip",
+    ownerOnly: true,
     react: "🔞",
     desc: "RedGifs video downloader (ALL niches, no repeats, HQ, WhatsApp safe)",
     category: "nsfw",
