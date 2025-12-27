@@ -1,10 +1,12 @@
 const { cmd } = require("../command");
 const fs = require("fs-extra");
 const path = require("path");
+const { isOwner } = require("../lib/auth");
 
 cmd(
   {
     pattern: "cleartemp",
+    ownerOnly: true,
     react: "🧹",
     desc: "Clear ./temp folder to free disk space",
     category: "system",
