@@ -30,7 +30,7 @@ jobs:
       run: pip install yt-dlp && pip install yt-dlp --upgrade
 
     - name: Install dependencies
-      run: npm install && npm i @whiskeysockets/baileys && npm install
+      run: npm install && npm i @whiskeysockets/baileys
 
     - name: Start application
       run: npm start
