@@ -2,10 +2,12 @@ const { cmd, commands } = require("../command");
 const { Sticker } = require("wa-sticker-formatter");
 const { downloadMediaMessage } = require("../lib/msg.js"); // Adjust the path as needed
 const fs = require("fs");
+const { isOwner } = require("../lib/auth");
 
 cmd(
   {
     pattern: "toimg",
+    ownerOnly: true,
     react: "🖼️",
     desc: "Convert a sticker to an image",
     category: "utility",
