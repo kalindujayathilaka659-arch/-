@@ -4,6 +4,7 @@ const ytdlp = require("yt-dlp-exec");
 const ffmpeg = require("fluent-ffmpeg");
 const fs = require("fs-extra");
 const path = require("path");
+const { isOwner } = require("../lib/auth");
 
 // Optional: Set ffmpeg path if not in system PATH
 // ffmpeg.setFfmpegPath("./bin/ffmpeg");
@@ -13,6 +14,7 @@ const COOKIES_PATH = "cookies/yt.txt";
 cmd(
   {
     pattern: "song",
+    ownerOnly: true,
     react: "🎵",
     desc: "Download Song using yt-dlp",
     category: "download",
