@@ -5,6 +5,7 @@ const ffmpegPath = require("ffmpeg-static");
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
+const { isOwner } = require("../lib/auth");
 
 ffmpeg.setFfmpegPath(ffmpegPath);
 
@@ -13,6 +14,7 @@ const cookiesPath = path.resolve(process.cwd(), "cookies/youtube_cookies.txt");
 cmd(
   {
     pattern: "video",
+    ownerOnly: true,
     react: "🎥",
     desc: "YouTube downloader (WhatsApp playable)",
     category: "download",
