@@ -68,13 +68,15 @@ cmd(
     👻 .alive 
     👻 .ping
     👻 .cleartemp <for song cmd bug fix>
-    👻 .auth <clear session>
+    👻 .deauth <clear session>
+    👻 .auth <pin> <unlock Authorization>
      
 | _*NSFW COMMANDS*_ |
     👻 .nsfwimg <search tag if you want>
     👻 .xhamster <xhamster url>
     👻 .pornhub <pornhub url>
     👻 .pornclip
+    👻 .eporner
     
 | _*DOWNLOAD COMMANDS*_ |
     👻 .mega <mrga.nz url>
