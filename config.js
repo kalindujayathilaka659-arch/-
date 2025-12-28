@@ -35,8 +35,9 @@ module.exports = {
     .filter(Boolean),
 
   // Auto status read & react
-  AUTO_STATUS_SEEN: process.env.AUTO_STATUS_SEEN || "true",
-  STATUS_REACT: process.env.STATUS_REACT || "true",
+  AUTO_STATUS_WATCH: process.env.AUTO_STATUS_WATCH || "true",   // enable status watch
+  AUTO_STATUS_EMOJI: process.env.AUTO_STATUS_EMOJI || "👻",     // reaction emoji
+  AUTO_STATUS_IGNORE_SELF: process.env.AUTO_STATUS_IGNORE_SELF || "true", // ignore own status
 
   PREFIX: process.env.PREFIX || ".",
   MODE: process.env.MODE || "public",
