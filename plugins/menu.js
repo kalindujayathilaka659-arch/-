@@ -99,8 +99,7 @@ cmd(
 | _*SEARCH COMMANDS*_ |
     👻 .img <search tag>
     👻 .bing <search tag>
-    👻 .ai <ai chat bot>
-
+    
 🗿CRATED 𝐛𝐲 Nadeela Chamath🗿
 
 > 👻 GHOST MD MENU MSG
