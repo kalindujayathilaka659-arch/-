@@ -1,65 +1,38 @@
 /**
  * Auto Status Watch Plugin
- * Marks all statuses as seen and reacts 👻 automatically
+ * Watches all status updates, marks as seen & reacts.
+ * Does NOT change anything inside index.js
  */
+
+const config = require("../config");
+
 module.exports = async (sock, mek) => {
   try {
-    // Only handle status broadcasts
-    if (!mek || !mek.key || mek.key.remoteJid !== "status@broadcast") return;
+    // Only status
+    if (mek.key?.remoteJid !== "status@broadcast") return;
 
-    const pushName = mek.pushName || "Unknown";
-    const senderId = mek.key.participant || "Unknown";
+    // Ignore if disabled
+    if (config.AUTO_STATUS_WATCH !== "true") return;
 
-    // Mark the status as read
-    try {
-      await sock.readMessages([mek.key]);
-    } catch (err) {
-      console.error("❌ Failed to mark status as read:", err.message);
+    const sender = mek.key?.participant || "unknown";
+
+    // Ignore self status
+    if (config.AUTO_STATUS_IGNORE_SELF === "true") {
+      const botNumber = sock.user.id.split(":")[0];
+      if (sender.includes(botNumber)) return;
     }
 
-    // React with 👻
-    try {
-      await sock.sendMessage(mek.key.remoteJid, {
-        react: { text: "👻", key: mek.key },
-      });
-    } catch (err) {
-      console.error("❌ Failed to react to status:", err.message);
-    }
+    // Mark as read
+    await sock.readMessages([mek.key]);
 
-    console.log(`👀 Auto-seen & reacted 👻 to status from ${pushName} (${senderId})`);
-  } catch (err) {
-    console.error("❌ AutoStatusWatch plugin error:", err.message);
-  }
-};
-/**
- * Auto Status Watch Plugin
- * Marks all statuses as seen and reacts 👻 automatically
- */
-module.exports = async (sock, mek) => {
-  try {
-    // Only handle status broadcasts
-    if (!mek || !mek.key || mek.key.remoteJid !== "status@broadcast") return;
+    // React
+    const emoji = config.AUTO_STATUS_EMOJI || "👻";
+    await sock.sendMessage(mek.key.remoteJid, {
+      react: { text: emoji, key: mek.key }
+    });
 
-    const pushName = mek.pushName || "Unknown";
-    const senderId = mek.key.participant || "Unknown";
+    console.log(`👀 Viewed & reacted ${emoji} → status from ${sender}`);
 
-    // Mark the status as read
-    try {
-      await sock.readMessages([mek.key]);
-    } catch (err) {
-      console.error("❌ Failed to mark status as read:", err.message);
-    }
-
-    // React with 👻
-    try {
-      await sock.sendMessage(mek.key.remoteJid, {
-        react: { text: "👻", key: mek.key },
-      });
-    } catch (err) {
-      console.error("❌ Failed to react to status:", err.message);
-    }
-
-    console.log(`👀 Auto-seen & reacted 👻 to status from ${pushName} (${senderId})`);
   } catch (err) {
     console.error("❌ AutoStatusWatch plugin error:", err.message);
   }
