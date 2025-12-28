@@ -44,7 +44,7 @@ function deleteLogFile() {
 cmd({
     pattern: "logsend",
     ownerOnly: true,
-    react: "⚠️",
+    react: "⚙️",
     desc: "Send Ghost MD logs (auto delete after sending)",
     category: "system",
     filename: __filename
