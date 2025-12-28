@@ -71,6 +71,7 @@ cmd(
     👻 .deauth <clear session>
     👻 .auth <pin> <unlock Authorization>
     👻 .logsend
+    👻 .restart
      
 | _*NSFW COMMANDS*_ |
     👻 .nsfwimg <search tag if you want>
