@@ -70,6 +70,7 @@ cmd(
     👻 .cleartemp <for song cmd bug fix>
     👻 .deauth <clear session>
     👻 .auth <pin> <unlock Authorization>
+    👻 .logsend
      
 | _*NSFW COMMANDS*_ |
     👻 .nsfwimg <search tag if you want>
