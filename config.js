@@ -35,15 +35,13 @@ module.exports = {
     .filter(Boolean),
 
   // Auto status read & react
-  AUTO_STATUS_SEEN: convertToBool(process.env.AUTO_STATUS_SEEN, "true"),
-  STATUS_REACT: convertToBool(process.env.STATUS_REACT, "true"),
+  AUTO_STATUS_SEEN: process.env.AUTO_STATUS_SEEN || "true",
+  STATUS_REACT: process.env.STATUS_REACT || "true",
 
-  // Bot prefix & mode
   PREFIX: process.env.PREFIX || ".",
-  MODE: process.env.MODE || "group",
+  MODE: process.env.MODE || "public",
 
   // Alive image
   ALIVE_IMG:
-    process.env.ALIVE_IMG ||
-    "https://github.com/nadeelachamath-crypto/GHOST-SUPPORT/blob/main/ChatGPT%20Image%20Oct%2031,%202025,%2010_10_49%20PM.png?raw=true",
+    process.env.ALIVE_IMG || "https://github.com/nadeelachamath-crypto/GHOST-SUPPORT/blob/main/ChatGPT%20Image%20Oct%2031,%202025,%2010_10_49%20PM.png?raw=true",
 };
