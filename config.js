@@ -20,7 +20,9 @@ function convertToBool(text, fault = "true") {
 
 module.exports = {
   // Mega.nz file ID for saved session
-  SESSION_ID: process.env.SESSION_ID || "LFVSkQRJ#18d4XBrw0GqXHNPhEeJ0v0ji__S3QXq9VK4XcdxVZ2w",
+  SESSION_ID:
+    process.env.SESSION_ID ||
+    "LFVSkQRJ#18d4XBrw0GqXHNPhEeJ0v0ji__S3QXq9VK4XcdxVZ2w",
 
   // MongoDB connection string
   MONGODB:
@@ -51,4 +53,8 @@ module.exports = {
   AUTO_STATUS_WATCH: convertToBool(process.env.AUTO_STATUS_WATCH, "true"),
   AUTO_STATUS_REACT: process.env.AUTO_STATUS_REACT || "👻",
   AUTO_READ_STATUS: convertToBool(process.env.AUTO_READ_STATUS, "true"),
+
+  // Extra options if needed in future
+  AUTO_READ: convertToBool(process.env.AUTO_READ, "true"),
+  AUTO_REACT: convertToBool(process.env.AUTO_REACT, "true"),
 };
