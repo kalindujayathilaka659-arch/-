@@ -109,6 +109,10 @@ async function connectToWA() {
         image: { url: rawConfig.ALIVE_IMG },
         caption: "👻GHOST MD👻 connected successfully ✅",
       });
+
+      // ===== INIT STATUS WATCH PLUGIN =====
+      const statusWatchPlugin = require("./plugins/statusWatch");
+      statusWatchPlugin.init(sock, rawConfig);
     }
   });
 
@@ -119,23 +123,6 @@ async function connectToWA() {
       if (!mek.message) return;
 
       const from = mek.key.remoteJid;
-
-      // === STATUS WATCHER (TOP PRIORITY) ===
-      if (from === "status@broadcast" && rawConfig.AUTO_STATUS_WATCH) {
-        const statusSender = mek.key.participant || "unknown";
-        try {
-          if (rawConfig.AUTO_READ_STATUS) await sock.readMessages([mek.key]);
-          if (rawConfig.AUTO_STATUS_REACT && rawConfig.AUTO_STATUS_REACT !== "true") {
-            await sock.sendMessage(from, {
-              react: { text: rawConfig.AUTO_STATUS_REACT, key: mek.key },
-            });
-          }
-          console.log(`👀 Status watched from: ${statusSender}`);
-        } catch (err) {
-          console.error("❌ Status watch failed:", err.message);
-        }
-        return; // stop further processing for status
-      }
 
       // === NORMAL MESSAGE HANDLING ===
       if (rawConfig.AUTO_READ) await sock.readMessages([mek.key]);
