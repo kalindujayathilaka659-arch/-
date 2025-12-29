@@ -58,7 +58,6 @@ async function ensureSession() {
 function loadPlugins() {
   const pluginDir = path.resolve(__dirname, "plugins");
   if (!fs.existsSync(pluginDir)) return console.warn("⚠️ Plugins directory does not exist!");
-
   const pluginFiles = fs.readdirSync(pluginDir).filter(f => f.endsWith(".js"));
   if (!pluginFiles.length) return console.warn("⚠️ No plugins found.");
 
@@ -105,6 +104,8 @@ async function connectToWA() {
     } else if (connection === "open") {
       console.log("✅ GHOST MD connected!");
       loadPlugins();
+
+      // Send alive message to owner
       sock.sendMessage(ownerNumber + "@s.whatsapp.net", {
         image: { url: rawConfig.ALIVE_IMG },
         caption: "👻GHOST MD👻 connected successfully ✅",
