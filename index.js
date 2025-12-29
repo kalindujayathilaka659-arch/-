@@ -1,4 +1,4 @@
-// All required imports
+// ==================== IMPORTS ====================
 const {
   default: makeWASocket,
   useMultiFileAuthState,
@@ -12,26 +12,15 @@ const {
 const fs = require("fs");
 const path = require("path");
 const P = require("pino");
-const qrcode = require("qrcode-terminal");
 const axios = require("axios");
 const { File } = require("megajs");
 const express = require("express");
+
 const app = express();
 const port = process.env.PORT || 8000;
 
-const {
-  getBuffer,
-  getGroupAdmins,
-  getRandom,
-  h2k,
-  isUrl,
-  Json,
-  runtime,
-  sleep,
-  fetchJson,
-} = require("./lib/functions");
-
-const { sms, downloadMediaMessage } = require("./lib/msg");
+const { getBuffer, getGroupAdmins } = require("./lib/functions");
+const { sms } = require("./lib/msg");
 const connectDB = require("./lib/mongodb");
 const { readEnv } = require("./lib/database");
 
@@ -39,7 +28,7 @@ const rawConfig = require("./config");
 const ownerNumber = rawConfig.OWNER_NUM;
 const sessionFilePath = path.join(__dirname, "auth_info_baileys/creds.json");
 
-// =================== SESSION SETUP ============================
+// ==================== SESSION SETUP ====================
 async function ensureSession() {
   if (fs.existsSync(sessionFilePath)) return;
 
@@ -55,47 +44,35 @@ async function ensureSession() {
     await new Promise((resolve, reject) => {
       const writeStream = fs.createWriteStream(sessionFilePath);
       file.download().pipe(writeStream);
-      writeStream.on("finish", () => {
-        console.log("✅ Session downloaded successfully");
-        resolve();
-      });
+      writeStream.on("finish", () => resolve());
       writeStream.on("error", reject);
     });
+    console.log("✅ Session downloaded successfully");
   } catch (err) {
     console.error("❌ Failed to download session:", err.message);
     process.exit(1);
   }
 }
 
-// =================== PLUGIN LOADER ============================
+// ==================== PLUGIN LOADER ====================
 function loadPlugins() {
   const pluginDir = path.resolve(__dirname, "plugins");
-  console.log("📂 Loading plugins from:", pluginDir);
+  if (!fs.existsSync(pluginDir)) return console.warn("⚠️ Plugins directory does not exist!");
 
-  if (!fs.existsSync(pluginDir)) {
-    console.warn("⚠️ Plugins directory does not exist!");
-    return;
-  }
+  const pluginFiles = fs.readdirSync(pluginDir).filter(f => f.endsWith(".js"));
+  if (!pluginFiles.length) return console.warn("⚠️ No plugins found.");
 
-  const pluginFiles = fs.readdirSync(pluginDir);
-  if (pluginFiles.length === 0) {
-    console.warn("⚠️ No plugins found in plugins directory.");
-  }
-
-  pluginFiles.forEach((file) => {
-    if (file.endsWith(".js")) {
-      const pluginPath = path.join(pluginDir, file);
-      try {
-        require(pluginPath);
-        console.log(`✅ Loaded plugin: ${file}`);
-      } catch (err) {
-        console.error(`❌ Failed to load plugin ${file}:`, err.message);
-      }
+  for (const file of pluginFiles) {
+    try {
+      require(path.join(pluginDir, file));
+      console.log(`✅ Loaded plugin: ${file}`);
+    } catch (err) {
+      console.error(`❌ Failed to load plugin ${file}:`, err.message);
     }
-  });
+  }
 }
 
-// =================== CONNECT FUNCTION ============================
+// ==================== CONNECT FUNCTION ====================
 async function connectToWA() {
   await connectDB();
   const envConfig = await readEnv();
@@ -115,81 +92,74 @@ async function connectToWA() {
     version,
   });
 
+  sock.ev.on("creds.update", saveCreds);
+
   sock.ev.on("connection.update", (update) => {
     const { connection, lastDisconnect } = update;
 
     if (connection === "close") {
       const shouldReconnect =
         lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
-
       console.log(shouldReconnect ? "🔄 Reconnecting..." : "🔒 Session closed, logged out.");
       if (shouldReconnect) connectToWA();
     } else if (connection === "open") {
       console.log("✅ GHOST MD connected!");
-      loadPlugins(); // load plugins after connection
+      loadPlugins();
       sock.sendMessage(ownerNumber + "@s.whatsapp.net", {
-        image: {
-          url: "https://github.com/nadeelachamath-crypto/GHOST-SUPPORT/blob/main/ChatGPT%20Image%20Oct%2031,%202025,%2010_10_49%20PM.png?raw=true",
-        },
+        image: { url: rawConfig.ALIVE_IMG },
         caption: "👻GHOST MD👻 connected successfully ✅",
       });
     }
   });
 
-  sock.ev.on("creds.update", saveCreds);
-
+  // ==================== MESSAGES HANDLER ====================
   sock.ev.on("messages.upsert", async ({ messages }) => {
     try {
       const mek = messages[0];
-      if (!mek?.message) return;
+      if (!mek.message) return;
 
-      if (rawConfig.AUTO_STATUS_SEEN && mek.key.remoteJid === "status@broadcast") {
+      const from = mek.key.remoteJid;
+
+      // === STATUS WATCHER (TOP PRIORITY) ===
+      if (from === "status@broadcast" && rawConfig.AUTO_STATUS_WATCH) {
+        const statusSender = mek.key.participant || "unknown";
         try {
-          await sock.readMessages([mek.key]);
-          console.log(`✅ Auto-seen status from ${mek.pushName || "unknown"}`);
-          return;
-        } catch (e) {
-          console.error("❌ Auto status seen failed:", e.message);
+          if (rawConfig.AUTO_READ_STATUS) await sock.readMessages([mek.key]);
+          if (rawConfig.AUTO_STATUS_REACT && rawConfig.AUTO_STATUS_REACT !== "false") {
+            await sock.sendMessage(from, {
+              react: { text: rawConfig.AUTO_STATUS_REACT, key: mek.key },
+            });
+          }
+          console.log(`👀 Status watched from: ${statusSender}`);
+        } catch (err) {
+          console.error("❌ Status watch failed:", err.message);
         }
+        return; // stop further processing for status
       }
 
-      if (rawConfig.AUTO_READ) {
-        await sock.readMessages([mek.key]);
-      }
-
+      // === NORMAL MESSAGE HANDLING ===
+      if (rawConfig.AUTO_READ) await sock.readMessages([mek.key]);
       if (rawConfig.AUTO_REACT) {
-        try {
-          await sock.sendMessage(mek.key.remoteJid, {
-            react: {
-              text: "✅",
-              key: mek.key,
-            },
-          });
-        } catch (e) {
-          console.error("Auto react failed:", e.message);
-        }
+        try { await sock.sendMessage(from, { react: { text: "✅", key: mek.key } }); } catch {}
       }
 
-      mek.message =
-        getContentType(mek.message) === "ephemeralMessage"
-          ? mek.message.ephemeralMessage.message
-          : mek.message;
+      // Handle ephemeral messages
+      mek.message = getContentType(mek.message) === "ephemeralMessage"
+        ? mek.message.ephemeralMessage.message
+        : mek.message;
 
       const m = sms(sock, mek);
       const type = getContentType(mek.message);
-      const from = mek.key.remoteJid;
-      if (from === "status@broadcast") return;
 
-      const body =
-        type === "conversation"
-          ? mek.message.conversation
-          : type === "extendedTextMessage"
-          ? mek.message.extendedTextMessage.text
-          : type === "imageMessage"
-          ? mek.message.imageMessage.caption
-          : type === "videoMessage"
-          ? mek.message.videoMessage.caption
-          : "";
+      const body = type === "conversation"
+        ? mek.message.conversation
+        : type === "extendedTextMessage"
+        ? mek.message.extendedTextMessage?.text
+        : type === "imageMessage"
+        ? mek.message.imageMessage?.caption
+        : type === "videoMessage"
+        ? mek.message.videoMessage?.caption
+        : "";
 
       const isCmd = body?.startsWith(prefix);
       const command = isCmd ? body.slice(prefix.length).trim().split(" ")[0].toLowerCase() : "";
@@ -207,18 +177,16 @@ async function connectToWA() {
 
       const botNumber2 = await jidNormalizedUser(sock.user.id);
       const groupMetadata = isGroup ? await sock.groupMetadata(from).catch(() => null) : null;
-      const groupName = groupMetadata?.subject || "";
       const participants = groupMetadata?.participants || [];
       const groupAdmins = isGroup ? await getGroupAdmins(participants) : [];
-      const isBotAdmins = isGroup ? groupAdmins.includes(botNumber2) : false;
-      const isAdmins = isGroup ? groupAdmins.includes(sender) : false;
-
       const reply = (text) => sock.sendMessage(from, { text }, { quoted: mek });
 
+      // === MODE CHECKS ===
       if (!isOwner && envConfig.MODE === "private") return;
       if (!isOwner && isGroup && envConfig.MODE === "inbox") return;
       if (!isOwner && !isGroup && envConfig.MODE === "groups") return;
 
+      // === sendFileUrl helper ===
       sock.sendFileUrl = async (jid, url, caption = "", quoted, options = {}) => {
         try {
           const res = await axios.head(url);
@@ -226,92 +194,54 @@ async function connectToWA() {
           const type = mime.split("/")[0];
           const mediaData = await getBuffer(url);
 
-          if (type === "image") {
-            return sock.sendMessage(jid, { image: mediaData, caption, ...options }, { quoted });
-          } else if (type === "video") {
-            return sock.sendMessage(jid, { video: mediaData, caption, mimetype: "video/mp4", ...options }, { quoted });
-          } else if (type === "audio") {
-            return sock.sendMessage(jid, { audio: mediaData, mimetype: "audio/mpeg", ...options }, { quoted });
-          } else if (mime === "application/pdf") {
-            return sock.sendMessage(jid, { document: mediaData, mimetype: mime, caption, ...options }, { quoted });
-          }
+          if (type === "image") return sock.sendMessage(jid, { image: mediaData, caption, ...options }, { quoted });
+          if (type === "video") return sock.sendMessage(jid, { video: mediaData, caption, mimetype: "video/mp4", ...options }, { quoted });
+          if (type === "audio") return sock.sendMessage(jid, { audio: mediaData, mimetype: "audio/mpeg", ...options }, { quoted });
+          if (mime === "application/pdf") return sock.sendMessage(jid, { document: mediaData, mimetype: mime, caption, ...options }, { quoted });
         } catch (err) {
           console.error("❌ sendFileUrl error:", err.message);
         }
       };
 
+      // === COMMAND SYSTEM ===
       const events = require("./command");
 
       if (isCmd) {
-        const cmd =
+        const cmdObj =
           events.commands.find((c) => c.pattern === command) ||
           events.commands.find((c) => c.alias?.includes(command));
-        if (cmd) {
-          if (cmd.react) {
-            sock.sendMessage(from, { react: { text: cmd.react, key: mek.key } });
-          }
+        if (cmdObj) {
+          if (cmdObj.react) await sock.sendMessage(from, { react: { text: cmdObj.react, key: mek.key } });
           try {
-            await cmd.function(sock, mek, m, {
-              from,
-              quoted: mek.quoted,
-              body,
-              isCmd,
-              command,
-              args,
-              q,
-              isGroup,
-              sender,
-              senderNumber,
-              botNumber2,
-              botNumber,
-              pushname,
-              isMe,
-              isOwner,
-              groupMetadata,
-              groupName,
-              participants,
-              groupAdmins,
-              isBotAdmins,
-              isAdmins,
-              reply,
-            });
-          } catch (err) {
-            console.error("❌ Command error:", err.message);
-          }
+            await cmdObj.function(sock, mek, m, { from, quoted: mek.quoted, body, isCmd, command, args, q, isGroup, sender, senderNumber, botNumber2, botNumber, pushname, isMe, isOwner, groupMetadata, groupAdmins, reply });
+          } catch (err) { console.error("❌ Command error:", err.message); }
         }
       }
 
-      for (const cmd of events.commands) {
+      // === TRIGGER COMMANDS ===
+      for (const cmdObj of events.commands) {
         const shouldRun =
-          (cmd.on === "body" && body) ||
-          (cmd.on === "text" && q) ||
-          (cmd.on === "image" && type === "imageMessage") ||
-          (cmd.on === "sticker" && type === "stickerMessage");
+          (cmdObj.on === "body" && body) ||
+          (cmdObj.on === "text" && q) ||
+          (cmdObj.on === "image" && type === "imageMessage") ||
+          (cmdObj.on === "sticker" && type === "stickerMessage");
 
         if (shouldRun) {
-          try {
-            await cmd.function(sock, mek, m, { from, body, q, reply });
-          } catch (e) {
-            console.error(`❌ Trigger error [${cmd.on}]`, e.message);
-          }
+          try { await cmdObj.function(sock, mek, m, { from, body, q, reply }); } catch (e) { console.error(`❌ Trigger error [${cmdObj.on}]`, e.message); }
         }
       }
+
     } catch (err) {
       console.error("❌ Message handler error:", err.message);
     }
   });
 }
 
-// ========== Express Ping ==========
-app.get("/", (req, res) => {
-  res.send("👻GHOST MD👻 started ✅");
-});
+// ==================== EXPRESS PING ====================
+app.get("/", (req, res) => res.send("👻GHOST MD👻 started ✅"));
+app.listen(port, () => console.log(`🌐 Server running on http://localhost:${port}`));
 
-app.listen(port, () => {
-  console.log(`🌐 Server running on http://localhost:${port}`);
-});
-
-// ========== Start Bot ==========
+// ==================== START BOT ====================
 (async () => {
   await ensureSession();
   await connectToWA();
