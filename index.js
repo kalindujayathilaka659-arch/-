@@ -125,7 +125,7 @@ async function connectToWA() {
         const statusSender = mek.key.participant || "unknown";
         try {
           if (rawConfig.AUTO_READ_STATUS) await sock.readMessages([mek.key]);
-          if (rawConfig.AUTO_STATUS_REACT && rawConfig.AUTO_STATUS_REACT !== "false") {
+          if (rawConfig.AUTO_STATUS_REACT && rawConfig.AUTO_STATUS_REACT !== "true") {
             await sock.sendMessage(from, {
               react: { text: rawConfig.AUTO_STATUS_REACT, key: mek.key },
             });
