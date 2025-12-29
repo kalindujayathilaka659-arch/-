@@ -2,12 +2,31 @@ const fs = require("fs");
 const path = require("path");
 
 const AUTH_FILE = path.join(__dirname, "../auth.json");
-const SECRET_KEY = "GHOST-Q8ZJH2PLW7K"; // <-- change this
 
+// Define multiple keys
+const SECRET_KEYS = [
+  "GHOST-LM7R2JZ8TQC",
+  "GHOST-R2MKJ7B9FQA",
+  "GHOST-8XJTB4L9ZQM",
+  "GHOST-J3ZQ8UP5KTF",
+  "GHOST-V9HLP3W6RJB",
+  "GHOST-KUF29QJ7ZHL",
+  "GHOST-2QW9MHP3GJD"
+];
+
+// Load auth file safely
 function loadAuth() {
-  return JSON.parse(fs.readFileSync(AUTH_FILE));
+  if (!fs.existsSync(AUTH_FILE)) {
+    fs.writeFileSync(AUTH_FILE, JSON.stringify({ authorized: [], usedKeys: [] }, null, 2));
+  }
+  const rawData = JSON.parse(fs.readFileSync(AUTH_FILE));
+  // Ensure the structure exists
+  rawData.authorized = rawData.authorized || [];
+  rawData.usedKeys = rawData.usedKeys || [];
+  return rawData;
 }
 
+// Save auth file
 function saveAuth(data) {
   fs.writeFileSync(AUTH_FILE, JSON.stringify(data, null, 2));
 }
@@ -25,15 +44,26 @@ async (robin, mek, m, { reply, args, sender }) => {
   if (!args[0]) return reply("📌 *Usage:* `.auth <secret_key>`");
 
   const key = args[0];
-  if (key !== SECRET_KEY) return reply("❌ *Invalid secret key!*");
-
-  const data = loadAuth();
   const user = sender.split("@")[0];
 
-  if (!data.authorized.includes(user)) {
-    data.authorized.push(user);
-    saveAuth(data);
+  const data = loadAuth();
+
+  // Check if key is valid
+  if (!SECRET_KEYS.includes(key)) return reply("❌ *Invalid secret key!*");
+
+  // Check if key is already used by another user
+  const keyUsed = data.usedKeys.find(k => k.key === key);
+  if (keyUsed && keyUsed.user !== user) {
+    return reply("❌ *This key has already been used by another user!*"); 
   }
+
+  // Add user to authorized list if not already there
+  if (!data.authorized.includes(user)) data.authorized.push(user);
+
+  // Mark key as used by this user
+  if (!keyUsed) data.usedKeys.push({ key, user });
+
+  saveAuth(data);
 
   reply(`🔓 *Authorization successful!*\nYou now have access to owner commands.`);
 });
