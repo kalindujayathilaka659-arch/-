@@ -1,29 +1,38 @@
-// plugins/statusWatch.js
+/**
+ * Auto Status Watch Plugin
+ * Watches all statuses from your contacts and reacts if configured.
+ */
+
 const { getContentType } = require("@whiskeysockets/baileys");
 
-module.exports = {
-  name: "statusWatch",
-  category: "utility",
-  desc: "Automatically watches and reacts to statuses from contacts",
-  async init(sock, rawConfig) {
-    sock.ev.on("messages.upsert", async ({ messages }) => {
-      try {
-        const mek = messages[0];
-        if (!mek.message) return;
+function init(sock, config) {
+  sock.ev.on("messages.upsert", async ({ messages }) => {
+    try {
+      const msg = messages[0];
+      if (!msg.message) return;
 
-        const from = mek.key.remoteJid;
+      // Only watch status updates
+      if (msg.key.remoteJid !== "status@broadcast") return;
 
-        if (from === "status@broadcast") {
-          if (rawConfig.AUTO_READ_STATUS) await sock.readMessages([mek.key]);
-          if (rawConfig.AUTO_STATUS_REACT && rawConfig.AUTO_STATUS_REACT !== "false") {
-            await sock.sendMessage(from, { react: { text: rawConfig.AUTO_STATUS_REACT, key: mek.key } });
-          }
+      const sender = msg.key.participant || "unknown";
 
-          console.log(`👀 Status watched from: ${mek.key.participant || "unknown"}`);
-        }
-      } catch (err) {
-        console.error("❌ Status watch plugin error:", err.message);
+      // Auto read status
+      if (config.AUTO_READ_STATUS) {
+        await sock.readMessages([msg.key]);
       }
-    });
-  },
-};
+
+      // Auto react to status
+      if (config.AUTO_STATUS_REACT && config.AUTO_STATUS_REACT !== "false") {
+        await sock.sendMessage(msg.key.remoteJid, {
+          react: { text: config.AUTO_STATUS_REACT, key: msg.key },
+        });
+      }
+
+      console.log(`👀 Status watched from: ${sender}`);
+    } catch (err) {
+      console.error("❌ Status watch plugin error:", err.message);
+    }
+  });
+}
+
+module.exports = { init };
