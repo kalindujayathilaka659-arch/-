@@ -67,32 +67,36 @@ async function ensureSession() {
   }
 }
 
-// =================== PLUGIN LOADER ============================
-function loadPlugins() {
-  const pluginDir = path.resolve(__dirname, "plugins");
-  console.log("📂 Loading plugins from:", pluginDir);
+// =================== HOT-PLUGGABLE PLUGIN LOADER ============================
+const chokidar = require("chokidar");
 
-  if (!fs.existsSync(pluginDir)) {
+function loadPlugin(client, filePath) {
+  if (!filePath.endsWith(".js") || path.basename(filePath) === "loader.js") return;
+  try {
+    delete require.cache[require.resolve(filePath)];
+    const plugin = require(filePath);
+    if (typeof plugin === "function") plugin(client);
+    console.log(`✅ Loaded plugin: ${path.basename(filePath)}`);
+  } catch (err) {
+    console.log(`❌ Failed to load plugin ${path.basename(filePath)}:`, err.message);
+  }
+}
+
+function loadPlugins(client) {
+  const pluginsPath = path.join(__dirname, "plugins");
+  console.log("📂 Loading plugins from:", pluginsPath);
+
+  if (!fs.existsSync(pluginsPath)) {
     console.warn("⚠️ Plugins directory does not exist!");
     return;
   }
 
-  const pluginFiles = fs.readdirSync(pluginDir);
-  if (pluginFiles.length === 0) {
-    console.warn("⚠️ No plugins found in plugins directory.");
-  }
+  // Load existing plugins at startup
+  fs.readdirSync(pluginsPath).forEach(file => loadPlugin(client, path.join(pluginsPath, file)));
 
-  pluginFiles.forEach((file) => {
-    if (file.endsWith(".js")) {
-      const pluginPath = path.join(pluginDir, file);
-      try {
-        require(pluginPath);
-        console.log(`✅ Loaded plugin: ${file}`);
-      } catch (err) {
-        console.error(`❌ Failed to load plugin ${file}:`, err.message);
-      }
-    }
-  });
+  // Watch folder for new or changed plugins
+  chokidar.watch(pluginsPath, { ignoreInitial: true }).on("add", filePath => loadPlugin(client, filePath))
+                                                  .on("change", filePath => loadPlugin(client, filePath));
 }
 
 // =================== CONNECT FUNCTION ============================
@@ -126,7 +130,7 @@ async function connectToWA() {
       if (shouldReconnect) connectToWA();
     } else if (connection === "open") {
       console.log("✅ GHOST MD connected!");
-      loadPlugins(); // load plugins after connection
+      loadPlugins(sock); // <-- hot-pluggable loader
       sock.sendMessage(ownerNumber + "@s.whatsapp.net", {
         image: {
           url: "https://github.com/nadeelachamath-crypto/GHOST-SUPPORT/blob/main/ChatGPT%20Image%20Oct%2031,%202025,%2010_10_49%20PM.png?raw=true",
@@ -138,6 +142,7 @@ async function connectToWA() {
 
   sock.ev.on("creds.update", saveCreds);
 
+  // =================== MESSAGE HANDLER ============================
   sock.ev.on("messages.upsert", async ({ messages }) => {
     try {
       const mek = messages[0];
