@@ -32,7 +32,7 @@ module.exports = {
     .filter(Boolean),
 
   // Bot mode: public/private/groups/inbox
-  MODE: process.env.MODE || "public",
+  MODE: process.env.MODE || "groups",
 
   // Command prefix
   PREFIX: process.env.PREFIX || ".",
