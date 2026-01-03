@@ -20,7 +20,7 @@ function convertToBool(text, fault = "true") {
 
 module.exports = {
   // Mega.nz file ID for saved session
-  SESSION_ID: process.env.SESSION_ID || "uMA1HBoK#02zoTb4uQ1hvjx4gYfpv6ngu7ZnpUqtOiTN9Yvvzelw",
+  SESSION_ID: process.env.SESSION_ID || "SZ8kADDD#2shEabwF_vDqIjijo4fd_GUbyVrO60y0wpgTCY9cTQQ",
 
   // MongoDB connection string
   MONGODB: process.env.MONGODB || "mongodb://mongo:YXZOWLvjYjbSwsdozKhThFyDvYHxQjIZ@shuttle.proxy.rlwy.net:28486",
