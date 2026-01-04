@@ -1,4 +1,4 @@
-// All required imports
+// ====================== IMPORTS ======================
 const {
   default: makeWASocket,
   useMultiFileAuthState,
@@ -19,27 +19,16 @@ const express = require("express");
 const app = express();
 const port = process.env.PORT || 8000;
 
-const {
-  getBuffer,
-  getGroupAdmins,
-  getRandom,
-  h2k,
-  isUrl,
-  Json,
-  runtime,
-  sleep,
-  fetchJson,
-} = require("./lib/functions");
-
+const { getBuffer, getGroupAdmins } = require("./lib/functions");
 const { sms, downloadMediaMessage } = require("./lib/msg");
 const connectDB = require("./lib/mongodb");
 const { readEnv } = require("./lib/database");
-
 const rawConfig = require("./config");
 const ownerNumber = rawConfig.OWNER_NUM;
 const sessionFilePath = path.join(__dirname, "auth_info_baileys/creds.json");
+const chokidar = require("chokidar");
 
-// =================== SESSION SETUP ============================
+// ====================== SESSION SETUP ======================
 async function ensureSession() {
   if (fs.existsSync(sessionFilePath)) return;
 
@@ -67,9 +56,7 @@ async function ensureSession() {
   }
 }
 
-// =================== HOT-PLUGGABLE PLUGIN LOADER ============================
-const chokidar = require("chokidar");
-
+// ====================== PLUGIN LOADER ======================
 function loadPlugin(client, filePath) {
   if (!filePath.endsWith(".js") || path.basename(filePath) === "loader.js") return;
   try {
@@ -86,24 +73,20 @@ function loadPlugins(client) {
   const pluginsPath = path.join(__dirname, "plugins");
   console.log("📂 Loading plugins from:", pluginsPath);
 
-  if (!fs.existsSync(pluginsPath)) {
-    console.warn("⚠️ Plugins directory does not exist!");
-    return;
-  }
+  if (!fs.existsSync(pluginsPath)) return;
 
-  // Load existing plugins at startup
   fs.readdirSync(pluginsPath).forEach(file => loadPlugin(client, path.join(pluginsPath, file)));
 
-  // Watch folder for new or changed plugins
-  chokidar.watch(pluginsPath, { ignoreInitial: true }).on("add", filePath => loadPlugin(client, filePath))
-                                                  .on("change", filePath => loadPlugin(client, filePath));
+  chokidar.watch(pluginsPath, { ignoreInitial: true })
+    .on("add", filePath => loadPlugin(client, filePath))
+    .on("change", filePath => loadPlugin(client, filePath));
 }
 
-// =================== CONNECT FUNCTION ============================
+// ====================== CONNECT FUNCTION ======================
 async function connectToWA() {
   await connectDB();
   const envConfig = await readEnv();
-  const prefix = envConfig.PREFIX;
+  const prefix = rawConfig.PREFIX || "!";
 
   console.log("🔌 Connecting GHOST MD...");
 
@@ -119,22 +102,20 @@ async function connectToWA() {
     version,
   });
 
+  // ====================== CONNECTION EVENTS ======================
   sock.ev.on("connection.update", (update) => {
     const { connection, lastDisconnect } = update;
 
     if (connection === "close") {
-      const shouldReconnect =
-        lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
-
+      const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
       console.log(shouldReconnect ? "🔄 Reconnecting..." : "🔒 Session closed, logged out.");
       if (shouldReconnect) connectToWA();
     } else if (connection === "open") {
       console.log("✅ GHOST MD connected!");
-      loadPlugins(sock); // <-- hot-pluggable loader
+      loadPlugins(sock);
+
       sock.sendMessage(ownerNumber + "@s.whatsapp.net", {
-        image: {
-          url: "https://github.com/nadeelachamath-crypto/GHOST-SUPPORT/blob/main/ChatGPT%20Image%20Oct%2031,%202025,%2010_10_49%20PM.png?raw=true",
-        },
+        image: { url: "https://github.com/nadeelachamath-crypto/GHOST-SUPPORT/blob/main/ChatGPT%20Image%20Oct%2031,%202025,%2010_10_49%20PM.png?raw=true" },
         caption: "👻GHOST MD👻 connected successfully ✅",
       });
     }
@@ -142,13 +123,40 @@ async function connectToWA() {
 
   sock.ev.on("creds.update", saveCreds);
 
-  // =================== MESSAGE HANDLER ============================
+  // ====================== MESSAGE HANDLER ======================
   sock.ev.on("messages.upsert", async ({ messages }) => {
     try {
       const mek = messages[0];
       if (!mek?.message) return;
 
-      if (rawConfig.AUTO_STATUS_SEEN && mek.key.remoteJid === "status@broadcast") {
+      const from = mek.key.remoteJid;
+      const isGroup = from.endsWith("@g.us");
+      const sender = mek.key.fromMe ? sock.user.id.split(":")[0] + "@s.whatsapp.net" : mek.key.participant || from;
+      const senderNumber = sender.split("@")[0];
+      const botNumber = sock.user.id.split(":")[0];
+      const isOwner = rawConfig.OWNER_NUM.includes(senderNumber) || senderNumber === botNumber;
+
+      // ===== MODE CHECK =====
+      switch (rawConfig.MODE) {
+        case "private":
+          if (!isOwner) return;
+          break;
+        case "inbox":
+          if (isGroup && !isOwner) return;
+          break;
+        case "groups":
+          if (!isGroup && !isOwner) return;
+          break;
+        case "public":
+          // everyone can use
+          break;
+        default:
+          console.warn(`⚠️ Unknown MODE: "${rawConfig.MODE}", defaulting to private.`);
+          if (!isOwner) return;
+      }
+
+      // ===== AUTO STATUS READ =====
+      if (rawConfig.AUTO_STATUS_SEEN && from === "status@broadcast") {
         try {
           await sock.readMessages([mek.key]);
           console.log(`✅ Auto-seen status from ${mek.pushName || "unknown"}`);
@@ -158,72 +166,45 @@ async function connectToWA() {
         }
       }
 
-      if (rawConfig.AUTO_READ) {
-        await sock.readMessages([mek.key]);
-      }
-
+      // ===== AUTO READ & REACT =====
+      if (rawConfig.AUTO_READ) await sock.readMessages([mek.key]);
       if (rawConfig.AUTO_REACT) {
         try {
-          await sock.sendMessage(mek.key.remoteJid, {
-            react: {
-              text: "✅",
-              key: mek.key,
-            },
-          });
+          await sock.sendMessage(from, { react: { text: "✅", key: mek.key } });
         } catch (e) {
           console.error("Auto react failed:", e.message);
         }
       }
 
-      mek.message =
-        getContentType(mek.message) === "ephemeralMessage"
-          ? mek.message.ephemeralMessage.message
-          : mek.message;
+      // ===== MESSAGE PARSING =====
+      mek.message = getContentType(mek.message) === "ephemeralMessage"
+        ? mek.message.ephemeralMessage.message
+        : mek.message;
 
-      const m = sms(sock, mek);
+      const m = sms(sock, mek); // make sure sms function is exported correctly
       const type = getContentType(mek.message);
-      const from = mek.key.remoteJid;
+
       if (from === "status@broadcast") return;
 
       const body =
-        type === "conversation"
-          ? mek.message.conversation
-          : type === "extendedTextMessage"
-          ? mek.message.extendedTextMessage.text
-          : type === "imageMessage"
-          ? mek.message.imageMessage.caption
-          : type === "videoMessage"
-          ? mek.message.videoMessage.caption
-          : "";
+        type === "conversation" ? mek.message.conversation :
+        type === "extendedTextMessage" ? mek.message.extendedTextMessage.text :
+        type === "imageMessage" ? mek.message.imageMessage.caption :
+        type === "videoMessage" ? mek.message.videoMessage.caption : "";
 
       const isCmd = body?.startsWith(prefix);
       const command = isCmd ? body.slice(prefix.length).trim().split(" ")[0].toLowerCase() : "";
       const args = body.trim().split(/\s+/).slice(1);
       const q = args.join(" ");
-      const isGroup = from.endsWith("@g.us");
-      const sender = mek.key.fromMe
-        ? sock.user.id.split(":")[0] + "@s.whatsapp.net"
-        : mek.key.participant || mek.key.remoteJid;
-      const senderNumber = sender.split("@")[0];
-      const botNumber = sock.user.id.split(":")[0];
-      const pushname = mek.pushName || "Sin Nombre";
-      const isMe = botNumber.includes(senderNumber);
-      const isOwner = rawConfig.OWNER_NUM.includes(senderNumber) || isMe;
 
       const botNumber2 = await jidNormalizedUser(sock.user.id);
       const groupMetadata = isGroup ? await sock.groupMetadata(from).catch(() => null) : null;
-      const groupName = groupMetadata?.subject || "";
       const participants = groupMetadata?.participants || [];
       const groupAdmins = isGroup ? await getGroupAdmins(participants) : [];
-      const isBotAdmins = isGroup ? groupAdmins.includes(botNumber2) : false;
-      const isAdmins = isGroup ? groupAdmins.includes(sender) : false;
 
       const reply = (text) => sock.sendMessage(from, { text }, { quoted: mek });
 
-      if (!isOwner && envConfig.MODE === "private") return;
-      if (!isOwner && isGroup && envConfig.MODE === "inbox") return;
-      if (!isOwner && !isGroup && envConfig.MODE === "groups") return;
-
+      // ===== SEND FILE FUNCTION =====
       sock.sendFileUrl = async (jid, url, caption = "", quoted, options = {}) => {
         try {
           const res = await axios.head(url);
@@ -231,68 +212,36 @@ async function connectToWA() {
           const type = mime.split("/")[0];
           const mediaData = await getBuffer(url);
 
-          if (type === "image") {
-            return sock.sendMessage(jid, { image: mediaData, caption, ...options }, { quoted });
-          } else if (type === "video") {
-            return sock.sendMessage(jid, { video: mediaData, caption, mimetype: "video/mp4", ...options }, { quoted });
-          } else if (type === "audio") {
-            return sock.sendMessage(jid, { audio: mediaData, mimetype: "audio/mpeg", ...options }, { quoted });
-          } else if (mime === "application/pdf") {
-            return sock.sendMessage(jid, { document: mediaData, mimetype: mime, caption, ...options }, { quoted });
-          }
+          if (type === "image") return sock.sendMessage(jid, { image: mediaData, caption, ...options }, { quoted });
+          if (type === "video") return sock.sendMessage(jid, { video: mediaData, caption, mimetype: "video/mp4", ...options }, { quoted });
+          if (type === "audio") return sock.sendMessage(jid, { audio: mediaData, mimetype: "audio/mpeg", ...options }, { quoted });
+          if (mime === "application/pdf") return sock.sendMessage(jid, { document: mediaData, mimetype: mime, caption, ...options }, { quoted });
         } catch (err) {
           console.error("❌ sendFileUrl error:", err.message);
         }
       };
 
+      // ===== COMMAND HANDLER =====
       const events = require("./command");
-
       if (isCmd) {
-        const cmd =
-          events.commands.find((c) => c.pattern === command) ||
-          events.commands.find((c) => c.alias?.includes(command));
-        if (cmd) {
-          if (cmd.react) {
-            sock.sendMessage(from, { react: { text: cmd.react, key: mek.key } });
-          }
+        const cmdObj = events.commands.find(c => c.pattern === command || c.alias?.includes(command));
+        if (cmdObj) {
+          if (cmdObj.react) sock.sendMessage(from, { react: { text: cmdObj.react, key: mek.key } });
           try {
-            await cmd.function(sock, mek, m, {
-              from,
-              quoted: mek.quoted,
-              body,
-              isCmd,
-              command,
-              args,
-              q,
-              isGroup,
-              sender,
-              senderNumber,
-              botNumber2,
-              botNumber,
-              pushname,
-              isMe,
-              isOwner,
-              groupMetadata,
-              groupName,
-              participants,
-              groupAdmins,
-              isBotAdmins,
-              isAdmins,
-              reply,
-            });
+            await cmdObj.function(sock, mek, m, { from, body, q, args, isGroup, sender, isOwner, reply });
           } catch (err) {
             console.error("❌ Command error:", err.message);
           }
         }
       }
 
+      // Trigger on events
       for (const cmd of events.commands) {
         const shouldRun =
           (cmd.on === "body" && body) ||
           (cmd.on === "text" && q) ||
           (cmd.on === "image" && type === "imageMessage") ||
           (cmd.on === "sticker" && type === "stickerMessage");
-
         if (shouldRun) {
           try {
             await cmd.function(sock, mek, m, { from, body, q, reply });
@@ -301,22 +250,21 @@ async function connectToWA() {
           }
         }
       }
+
     } catch (err) {
       console.error("❌ Message handler error:", err.message);
     }
   });
 }
 
-// ========== Express Ping ==========
+// ====================== EXPRESS PING ======================
 app.get("/", (req, res) => {
   res.send("👻GHOST MD👻 started ✅");
 });
 
-app.listen(port, () => {
-  console.log(`🌐 Server running on http://localhost:${port}`);
-});
+app.listen(port, () => console.log(`🌐 Server running on http://localhost:${port}`));
 
-// ========== Start Bot ==========
+// ====================== START BOT ======================
 (async () => {
   await ensureSession();
   await connectToWA();
