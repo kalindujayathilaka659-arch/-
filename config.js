@@ -19,7 +19,12 @@ module.exports = {
 
   OWNER_NUM: (process.env.OWNER_NUM || "94701981053").split(","),
 
-  MODE: (process.env.MODE || "group"),
+AUTO_READ_STATUS: true,   // true = read status
+AUTO_LIKE_STATUS: true,   // true = like (heart/react) status
+AUTO_REPLY_STATUS: true,   
+STATUS_REACT_EMOJI: "👻",  // emoji for status reaction
+STATUS_REPLY_TEXT: "🔥 Nice status!",
 
-  ALIVE_IMG: process.env.ALIVE_IMG || "https://github.com/nadeelachamath-crypto/GHOST-SUPPORT/blob/main/ChatGPT%20Image%20Oct%2031,%202025,%2010_10_49%20PM.png?raw=true"
+MODE: process.env.MODE || "public",
+ALIVE_IMG: process.env.ALIVE_IMG || "https://github.com/nadeelachamath-crypto/GHOST-SUPPORT/blob/main/ChatGPT%20Image%20Oct%2031,%202025,%2010_10_49%20PM.png?raw=true"
 };
