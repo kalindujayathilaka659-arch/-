@@ -24,7 +24,8 @@ AUTO_LIKE_STATUS: true,   // true = like (heart/react) status
 AUTO_REPLY_STATUS: true,   
 STATUS_REACT_EMOJI: "👻",  // emoji for status reaction
 STATUS_REPLY_TEXT: "🔥 Nice status!",
+MODE: "groups", // Options: "public" | "private" | "inbox" | "groups"
+PREFIX: ".",
 
-MODE: process.env.MODE || "public",
 ALIVE_IMG: process.env.ALIVE_IMG || "https://github.com/nadeelachamath-crypto/GHOST-SUPPORT/blob/main/ChatGPT%20Image%20Oct%2031,%202025,%2010_10_49%20PM.png?raw=true"
 };
