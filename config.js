@@ -18,7 +18,8 @@ module.exports = {
   MONGODB: process.env.MONGODB || "mongodb://mongo:XenHeRDUjMLxafGOvMuPVNoSEwqdNCPo@tramway.proxy.rlwy.net:39180",
 
   OWNER_NUM: (process.env.OWNER_NUM || "94701981053").split(","),
-AUTH_SYSTEM: true,
+
+AUTH_SYSTEM: false,
 AUTO_READ_STATUS: true,   // true = read status
 AUTO_LIKE_STATUS: true,   // true = like (heart/react) status
 AUTO_REPLY_STATUS: false,   
