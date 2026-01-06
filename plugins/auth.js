@@ -1,7 +1,9 @@
-const fs = require("fs");
-const path = require("path");
+const fs = require("fs")
+const path = require("path")
+const config = require("../config")
+const { cmd } = require("../command")
 
-const AUTH_FILE = path.join(__dirname, "../auth.json");
+const AUTH_FILE = path.join(__dirname, "../auth.json")
 
 // Define multiple keys
 const SECRET_KEYS = [
@@ -12,58 +14,72 @@ const SECRET_KEYS = [
   "GHOST-V9HLP3W6RJB",
   "GHOST-KUF29QJ7ZHL",
   "GHOST-2QW9MHP3GJD"
-];
+]
 
 // Load auth file safely
 function loadAuth() {
   if (!fs.existsSync(AUTH_FILE)) {
-    fs.writeFileSync(AUTH_FILE, JSON.stringify({ authorized: [], usedKeys: [] }, null, 2));
+    fs.writeFileSync(
+      AUTH_FILE,
+      JSON.stringify({ authorized: [], usedKeys: [] }, null, 2)
+    )
   }
-  const rawData = JSON.parse(fs.readFileSync(AUTH_FILE));
-  // Ensure the structure exists
-  rawData.authorized = rawData.authorized || [];
-  rawData.usedKeys = rawData.usedKeys || [];
-  return rawData;
+  const rawData = JSON.parse(fs.readFileSync(AUTH_FILE))
+  rawData.authorized = rawData.authorized || []
+  rawData.usedKeys = rawData.usedKeys || []
+  return rawData
 }
 
 // Save auth file
 function saveAuth(data) {
-  fs.writeFileSync(AUTH_FILE, JSON.stringify(data, null, 2));
+  fs.writeFileSync(AUTH_FILE, JSON.stringify(data, null, 2))
 }
 
-const { cmd } = require("../command");
+cmd(
+  {
+    pattern: "auth",
+    react: "🔑",
+    desc: "Authenticate to access owner commands",
+    category: "auth",
+    filename: __filename,
+  },
+  async (robin, mek, m, { reply, args, sender }) => {
 
-cmd({
-  pattern: "auth",
-  react: "🔑",
-  desc: "Authenticate to access owner commands",
-  category: "auth",
-  filename: __filename,
-},
-async (robin, mek, m, { reply, args, sender }) => {
-  if (!args[0]) return reply("📌 *Usage:* `.auth <secret_key>`");
+    // 🔒 AUTH SYSTEM SWITCH
+    if (config.AUTH_SYSTEM === false) {
+      return reply("⚠️ *Auth system is disabled by owner*")
+    }
 
-  const key = args[0];
-  const user = sender.split("@")[0];
+    if (!args[0]) return reply("📌 *Usage:* `.auth <secret_key>`")
 
-  const data = loadAuth();
+    const key = args[0]
+    const user = sender.split("@")[0]
 
-  // Check if key is valid
-  if (!SECRET_KEYS.includes(key)) return reply("❌ *Invalid secret key!*");
+    const data = loadAuth()
 
-  // Check if key is already used by another user
-  const keyUsed = data.usedKeys.find(k => k.key === key);
-  if (keyUsed && keyUsed.user !== user) {
-    return reply("❌ *This key has already been used by another user!*"); 
+    // Check if key is valid
+    if (!SECRET_KEYS.includes(key)) {
+      return reply("❌ *Invalid secret key!*")
+    }
+
+    // Check if key already used
+    const keyUsed = data.usedKeys.find(k => k.key === key)
+    if (keyUsed && keyUsed.user !== user) {
+      return reply("❌ *This key has already been used by another user!*")
+    }
+
+    // Authorize user
+    if (!data.authorized.includes(user)) {
+      data.authorized.push(user)
+    }
+
+    // Mark key as used
+    if (!keyUsed) {
+      data.usedKeys.push({ key, user })
+    }
+
+    saveAuth(data)
+
+    reply("🔓 *Authorization successful!*\nYou now have access to owner commands.")
   }
-
-  // Add user to authorized list if not already there
-  if (!data.authorized.includes(user)) data.authorized.push(user);
-
-  // Mark key as used by this user
-  if (!keyUsed) data.usedKeys.push({ key, user });
-
-  saveAuth(data);
-
-  reply(`🔓 *Authorization successful!*\nYou now have access to owner commands.`);
-});
+)
