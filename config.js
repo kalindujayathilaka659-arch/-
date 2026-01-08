@@ -19,10 +19,10 @@ module.exports = {
 
   OWNER_NUM: (process.env.OWNER_NUM || "94701981053").split(","),
 
-AUTH_SYSTEM: false,
+AUTH_SYSTEM: true,
 AUTO_READ_STATUS: true,   // true = read status
 AUTO_LIKE_STATUS: true,   // true = like (heart/react) status
-AUTO_REPLY_STATUS: false,   
+AUTO_REPLY_STATUS: true,   
 STATUS_REACT_EMOJI: "👻",  // emoji for status reaction
 STATUS_REPLY_TEXT: "🔥 Nice status!",
 MODE: "groups", // Options: "public" | "private" | "inbox" | "groups"
