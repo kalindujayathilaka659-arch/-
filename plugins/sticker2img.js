@@ -1,7 +1,9 @@
-const { cmd, commands } = require("../command");
+const { cmd } = require("../command");
 const { Sticker } = require("wa-sticker-formatter");
-const { downloadMediaMessage } = require("../lib/msg.js"); // Adjust the path as needed
+const { downloadMediaMessage, sms } = require("../lib/msg.js");
 const fs = require("fs");
+const path = require("path");
+const os = require("os");
 const { isOwner } = require("../lib/auth");
 
 cmd(
@@ -13,59 +15,37 @@ cmd(
     category: "utility",
     filename: __filename,
   },
-  async (
-    robin,
-    mek,
-    m,
-    {
-      from,
-      quoted,
-      body,
-      isCmd,
-      command,
-      args,
-      q,
-      isGroup,
-      sender,
-      senderNumber,
-      botNumber2,
-      botNumber,
-      pushname,
-      isMe,
-      isOwner,
-      groupMetadata,
-      groupName,
-      participants,
-      groupAdmins,
-      isBotAdmins,
-      isAdmins,
-      reply,
-    }
-  ) => {
+  async (sock, mek, m, { from, reply }) => {
     try {
-      // Ensure the message contains a sticker to convert
-      if (!quoted || quoted.stickerMessage == null) {
-        return reply("Please reply to a sticker to convert it to an image.");
+      // Normalize message
+      const message = sms(sock, mek);
+
+      // Determine quoted or direct sticker
+      const quoted = message.quoted || message;
+
+      // Check if message has a sticker
+      const mType = quoted.type;
+      if (mType !== "stickerMessage") {
+        return reply("🖼️ Please reply to a sticker to convert it to an image.");
       }
 
-      // Download the sticker from the quoted message
+      // Download sticker
       const stickerBuffer = await downloadMediaMessage(quoted, "stickerInput");
       if (!stickerBuffer)
-        return reply("Failed to download the sticker. Try again!");
+        return reply("❌ Failed to download the sticker. Try again!");
 
-      // Convert the sticker buffer to an image (using Sticker class)
+      // Convert sticker to image buffer using Sticker class
       const sticker = new Sticker(stickerBuffer, {
         pack: "👻GHOST",
         author: "MD👻",
-        type: "FULL", // This may not be needed, but ensures we're using the full sticker format
-        quality: 100, // Quality of the output image (0-100)
+        type: "FULL",
+        quality: 100,
       });
 
-      // Get the image buffer
       const imageBuffer = await sticker.toBuffer({ format: "image/jpeg" });
 
-      // Send the image as a response
-      await robin.sendMessage(
+      // Send the image
+      await sock.sendMessage(
         from,
         {
           image: imageBuffer,
@@ -73,9 +53,9 @@ cmd(
         },
         { quoted: mek }
       );
-    } catch (e) {
-      console.error(e);
-      reply(`Error: ${e.message || e}`);
+    } catch (err) {
+      console.error("❌ toimg error:", err);
+      reply(`❌ Failed to convert sticker: ${err.message || err}`);
     }
   }
 );
