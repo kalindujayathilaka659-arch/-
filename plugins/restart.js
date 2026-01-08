@@ -2,12 +2,14 @@ const fs = require("fs");
 const path = require("path");
 const { cmd } = require("../command");
 const configPath = path.join(__dirname, "../config.js");
+const { isOwner } = require("../lib/auth");
 
 cmd({
   pattern: "set",
   react: "⚙️",
   desc: "Edit bot settings dynamically",
   category: "owner",
+  ownerOnly: true,
   filename: __filename,
 }, async (robin, mek, m, { args, reply, sender }) => {
   const isOwner = require("../lib/auth").isOwner;
