@@ -11,6 +11,7 @@ cmd(
   {
     pattern: "sticker",
     react: "🧩",
+    ownerOnly: true,
     desc: "Convert image or short video (<20s) to sticker",
     category: "utility",
     filename: __filename,
