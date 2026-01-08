@@ -4,6 +4,7 @@ const { isOwner } = require("../lib/auth");
 cmd({
   pattern: "restart",
   react: "♻️",
+  ownerOnly: true,
   desc: "Restart the bot",
   category: "owner",
   filename: __filename,
