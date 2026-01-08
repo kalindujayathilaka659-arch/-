@@ -1,48 +1,25 @@
 const { readEnv } = require("../lib/database");
 const { cmd, commands } = require("../command");
-const { isOwner } = require("../lib/auth");
 
 cmd(
   {
     pattern: "menu",
-    alise: ["getmenu"],
+    alias: ["getmenu"],
     ownerOnly: true,
     react: "📝",
-    desc: "get cmd list",
+    desc: "Get command list",
     category: "main",
     filename: __filename,
   },
-  async (
-    robin,
-    mek,
-    m,
-    {
-      from,
-      quoted,
-      body,
-      isCmd,
-      command,
-      args,
-      q,
-      isGroup,
-      sender,
-      senderNumber,
-      botNumber2,
-      botNumber,
-      pushname,
-      isMe,
-      isOwner,
-      groupMetadata,
-      groupName,
-      participants,
-      groupAdmins,
-      isBotAdmins,
-      isAdmins,
-      reply,
-    }
-  ) => {
+  async (robin, mek, m, { from, sender, reply }) => {
     try {
       const config = await readEnv();
+      const PREFIX = config.PREFIX || ".";
+
+      const userName =
+        mek?.pushName || m?.pushName || sender?.split("@")[0] || "User";
+
+      // Prepare menu categories
       let menu = {
         main: "",
         download: "",
@@ -50,57 +27,60 @@ cmd(
         owner: "",
         convert: "",
         search: "",
+        nsfw: "",
       };
 
+      // Populate menu dynamically
       for (let i = 0; i < commands.length; i++) {
-        if (commands[i].pattern && !commands[i].dontAddCommandList) {
-          menu[
-            commands[i].category
-          ] += `${config.PREFIX}${commands[i].pattern}\n`;
-        }
+        const cmdItem = commands[i];
+        if (!cmdItem.pattern || cmdItem.dontAddCommandList) continue;
+
+        if (!menu[cmdItem.category]) menu[cmdItem.category] = "";
+        menu[cmdItem.category] += `    👻 ${PREFIX}${cmdItem.pattern}\n`;
       }
 
-      let madeMenu = `👻 *Hello ${pushname}*
-
+      // Build menu in the style you like
+      const madeMenu = `
+👻 *Hello ${userName}*
 
 | _*MAIN COMMANDS*_ |
-    👻 .menu
-    👻 .alive 
-    👻 .ping
-    👻 .cleartemp <for song cmd bug fix>
-    👻 .deauth <clear session>
-    👻 .auth <pin> <unlock Authorization>
-    👻 .restart
+    👻 ${config.PREFIX}menu
+    👻 ${config.PREFIX}alive 
+    👻 ${config.PREFIX}ping
+    👻 ${config.PREFIX}cleartemp <for song cmd bug fix>
+    👻 ${config.PREFIX}deauth <clear session>
+    👻 ${config.PREFIX}auth <pin> <unlock Authorization>
+    👻 ${config.PREFIX}restart
      
 | _*NSFW COMMANDS*_ |
-    👻 .nsfwimg <search tag if you want>
-    👻 .xhamster <xhamster url>
-    👻 .pornhub <pornhub url>
-    👻 .pornclip
-    👻 .eporner
+    👻 ${config.PREFIX}nsfwimg <search tag if you want>
+    👻 ${config.PREFIX}xhamster <xhamster url>
+    👻 ${config.PREFIX}pornhub <pornhub url>
+    👻 ${config.PREFIX}pornclip
+    👻 ${config.PREFIX}eporner
     
 | _*DOWNLOAD COMMANDS*_ |
-    👻 .mega <mrga.nz url>
-    👻 .download <direct download url>
-    👻 .torrent <torrent magnet url>
+    👻 ${config.PREFIX}mega <mrga.nz url>
+    👻 ${config.PREFIX}download <direct download url>
+    👻 ${config.PREFIX}torrent <torrent magnet url>
     
 | _*SOCIAL MEDIA DOWNLOAD COMMANDS*_ |
-    👻 .song <song name>
-    👻 .fb <fb video url>
-    👻 .tiktok <tiktok url>
-    👻 .video <yt video name>
-    👻 .ig <insta url>
+    👻 ${config.PREFIX}song <song name>
+    👻 ${config.PREFIX}fb <fb video url>
+    👻 ${config.PREFIX}tiktok <tiktok url>
+    👻 ${config.PREFIX}video <yt video name>
+    👻 ${config.PREFIX}ig <insta url>
     
 | _*CONVERT COMMANDS*_ |
-    👻 .sticker
-    👻 .toimg
-    👻 .wordlist 
+    👻 ${config.PREFIX}sticker
+    👻 ${config.PREFIX}toimg
+    👻 ${config.PREFIX}wordlist 
     
 | _*SEARCH COMMANDS*_ |
-    👻 .img <search tag>
-    👻 .bing <search tag>
+    👻 ${config.PREFIX}img <search tag>
+    👻 ${config.PREFIX}bing <search tag>
     
-🗿CRATED 𝐛𝐲 Nadeela Chamath🗿
+🗿 CREATED BY Nadeela Chamath 🗿
 
 > 👻 GHOST MD MENU MSG
 `;
@@ -115,8 +95,8 @@ cmd(
         { quoted: mek }
       );
     } catch (e) {
-      console.log(e);
-      reply(`${e}`);
+      console.error("❌ Menu error:", e);
+      reply(`❌ Error: ${e.message || e}`);
     }
   }
 );
