@@ -1,5 +1,6 @@
 const { readEnv } = require("../lib/database");
 const { cmd, commands } = require("../command");
+const { isOwner } = require("../lib/auth");
 
 cmd(
   {
