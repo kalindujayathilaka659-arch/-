@@ -5,6 +5,7 @@ const path = require("path")
 const os = require("os")
 const ffmpeg = require("fluent-ffmpeg")
 const { sms, downloadMediaMessage } = require("../lib/msg")
+const { isOwner } = require("../lib/auth");
 
 cmd(
   {
