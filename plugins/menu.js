@@ -51,6 +51,7 @@ cmd(
     👻 ${config.PREFIX}cleartemp <for song cmd bug fix>
     👻 ${config.PREFIX}deauth <clear session>
     👻 ${config.PREFIX}auth <pin> <unlock Authorization>
+    👻 ${config.PREFIX}set <change settings>
     👻 ${config.PREFIX}restart
      
 | _*NSFW COMMANDS*_ |
