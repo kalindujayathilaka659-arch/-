@@ -56,7 +56,7 @@ async (bot, msg, m, { from, q, reply }) => {
 ⏳ Duration: ${duration_string || "N/A"}
 🏷️ Category: ${categories?.join(", ") || "N/A"}
 
-⬇️ *Downloading video... please wait...*`;
+📥 *Downloading video... please wait...*`;
 
     if (thumbBuffer) {
       await bot.sendMessage(from, {
