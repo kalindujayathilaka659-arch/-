@@ -119,7 +119,7 @@ cmd(
               `📦 *Quality:* ${quality}p\n` +
               `📁 *Size:* ${sizeMB}\n` +
               `🔗 *URL:* ${url}\n\n` +
-              `⬇️ *Downloading video…*`,
+              `📥 *Downloading video…*`,
           },
           { quoted: mek }
         );
