@@ -110,7 +110,7 @@ cmd(
               `👁 *Views:* ${views}\n` +
               `📦 *Quality:* ${quality}\n` +
               `🔗 *URL:* ${query}\n\n` +
-              `⏬ *Downloading video…*`,
+              `📥 *Downloading video…*`,
           },
           { quoted: mek }
         );
@@ -168,5 +168,6 @@ cmd(
     }
   }
 );
+
 
 
