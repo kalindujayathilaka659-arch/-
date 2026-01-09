@@ -30,7 +30,7 @@ cmd(
   {
     pattern: "xhamster",
     ownerOnly: true,
-    react: "🎥",
+    react: "🍑",
     desc: "Download XHamster video (thumbnail + metadata first)",
     category: "nsfw",
     filename: __filename,
