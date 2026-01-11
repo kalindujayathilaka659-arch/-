@@ -27,7 +27,7 @@ jobs:
         node-version: ${{ matrix.node-version }}
 
     - name: Install python dependencies
-      run: pip install yt-dlp && pip install yt-dlp --upgrade
+      run: pip install yt-dlp && pip install yt-dlp -U
 
     - name: Install dependencies
       run: npm install && npm i @whiskeysockets/baileys
