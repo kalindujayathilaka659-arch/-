@@ -17,7 +17,7 @@ module.exports = {
 
   MONGODB: process.env.MONGODB || "mongodb://mongo:XenHeRDUjMLxafGOvMuPVNoSEwqdNCPo@tramway.proxy.rlwy.net:39180",
 
-  OPENAI_API_KEY: process.env.OPENAI_API_KEY || "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",
+  OPENAI_API_KEY: process.env.OPENAI_API_KEY || "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",
 
   OWNER_NUM: (process.env.OWNER_NUM || "94701981053").split(","),
 
