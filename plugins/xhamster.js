@@ -3,9 +3,12 @@ const { execFile } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 const ffmpegPath = require("ffmpeg-static");
-const { isOwner } = require("../lib/auth");
 
-/* ---------- helpers ---------- */
+/* ================= CONFIG ================= */
+const ALLOWED_QUALITIES = [360, 480, 720, 1080];
+const DEFAULT_QUALITY = 720;
+
+/* ================= HELPERS ================= */
 function findFile(dir, ext) {
   return fs.readdirSync(dir).find(f => f.endsWith(ext));
 }
@@ -26,36 +29,48 @@ function formatDuration(sec) {
   return [h, m, s].map(v => String(v).padStart(2, "0")).join(":");
 }
 
+// yt-dlp-friendly video URL validation
+function isValidXHamsterVideo(url) {
+  return typeof url === "string" && url.includes("xhamster.com/videos/");
+}
+
+/* ================= COMMAND ================= */
 cmd(
   {
     pattern: "xhamster",
     ownerOnly: true,
     react: "🍑",
-    desc: "Download XHamster video (thumbnail + metadata first)",
+    desc: "Download XHamster video with quality selector",
     category: "nsfw",
     filename: __filename,
   },
   async (robin, mek, m, { q, from, reply }) => {
     try {
-      if (!q) return reply("❌ Provide XHamster URL");
+      if (!q) return reply("❌ Usage: .xhamster [360|480|720|1080] <video-url>");
       if (!ffmpegPath) throw new Error("ffmpeg-static missing");
 
-      /* ---------- parse input ---------- */
-      const args = q.trim().split(/\s+/);
-      let quality = "720";
-      let url = "";
+      /* -------- Parse quality selector -------- */
+      let quality = DEFAULT_QUALITY;
+      let url = q;
 
-      if (/^\d{3,4}p$/i.test(args[0])) {
-        quality = args[0].replace("p", "");
-        url = args[1];
-      } else {
-        url = args[0];
+      const parts = q.trim().split(/\s+/);
+      if (parts.length > 1) {
+        let first = parts[0].toLowerCase().replace("p", ""); // remove optional "p"
+        if (ALLOWED_QUALITIES.includes(parseInt(first))) {
+          quality = parseInt(first);
+          url = parts.slice(1).join(" "); // rest is URL
+        }
       }
 
-      if (!url.includes("xhamster.com"))
-        return reply("❌ Invalid XHamster URL");
+      if (!isValidXHamsterVideo(url)) {
+        return reply(
+          "❌ Unsupported XHamster URL\n\n" +
+          "✅ Use a *direct video link*, example:\n" +
+          "https://xhamster.com/videos/video-name-1234567"
+        );
+      }
 
-      /* ---------- paths ---------- */
+      /* -------- Paths -------- */
       const tempDir = path.join(__dirname, "../temp");
       fs.mkdirSync(tempDir, { recursive: true });
 
@@ -63,18 +78,14 @@ cmd(
       const outputTemplate = path.join(tempDir, "xhamster_%(id)s.%(ext)s");
 
       /* =====================================================
-         1️⃣ METADATA + THUMBNAIL (NO VIDEO DOWNLOAD)
+         1️⃣ METADATA + THUMBNAIL (NO VIDEO)
       ===================================================== */
       const metaArgs = [
         "--skip-download",
-
         "--write-thumbnail",
         "--convert-thumbnails", "jpg",
-
         "--write-info-json",
-
-        "--ffmpeg-location", ffmpegPath, // ✅ FIX (CRITICAL)
-
+        "--ffmpeg-location", ffmpegPath,
         "--cookies", cookiesFile,
         "-o", outputTemplate,
         url
@@ -86,23 +97,39 @@ cmd(
 
       const infoFile = findFile(tempDir, ".info.json");
       const thumbFile = findFile(tempDir, ".jpg");
-
-      if (!infoFile) throw new Error("Metadata not found");
+      if (!infoFile) throw new Error("Metadata missing");
 
       const info = JSON.parse(
         fs.readFileSync(path.join(tempDir, infoFile), "utf8")
       );
 
-      const title    = info.title || "XHamster Video";
-      const channel  = info.uploader || "XHamster";
-      const views    = info.view_count ? info.view_count.toLocaleString() : "Unknown";
-      const stars    = Array.isArray(info.cast) && info.cast.length ? info.cast.join(", ") : "Unknown";
-      const duration = formatDuration(info.duration);
-      const sizeMB   = info.filesize_approx
-        ? (info.filesize_approx / 1048576).toFixed(2) + " MB"
-        : "Unknown";
+      /* -------- Quality availability -------- */
+      const heights = info.formats
+        ?.filter(f => f.height)
+        .map(f => f.height);
 
-      /* ---------- SEND THUMB + METADATA FIRST ---------- */
+      const maxAvailable = heights?.length ? Math.max(...heights) : quality;
+
+      if (quality > maxAvailable) {
+        reply(`⚠ Requested ${quality}p not available. Downloading ${maxAvailable}p instead.`);
+        quality = maxAvailable;
+      }
+
+      const availableQualities = [...new Set(heights || [])]
+        .sort((a, b) => a - b)
+        .map(q => `${q}p`)
+        .join(", ");
+
+      /* -------- Metadata -------- */
+      const title = info.title || "XHamster Video";
+      const channel = info.uploader || "XHamster";
+      const views = info.view_count ? info.view_count.toLocaleString() : "Unknown";
+      const stars = Array.isArray(info.cast) && info.cast.length
+        ? info.cast.join(", ")
+        : "Unknown";
+      const duration = formatDuration(info.duration);
+
+      /* -------- Send thumbnail + info -------- */
       if (thumbFile) {
         await robin.sendMessage(
           from,
@@ -116,9 +143,8 @@ cmd(
               `👤 *Channel:* ${channel}\n` +
               `⭐ *Stars:* ${stars}\n` +
               `👁 *Views:* ${views}\n` +
-              `📦 *Quality:* ${quality}p\n` +
-              `📁 *Size:* ${sizeMB}\n` +
-              `🔗 *URL:* ${url}\n\n` +
+              `📺 *Available:* ${availableQualities || "Unknown"}\n` +
+              `📦 *Selected:* ${quality}p\n\n` +
               `📥 *Downloading video…*`,
           },
           { quoted: mek }
@@ -132,13 +158,13 @@ cmd(
         "--no-warnings",
         "--continue",
         "--retries", "infinite",
-
         "--ffmpeg-location", ffmpegPath,
 
-        "-f", `bv*[height<=${quality}]+ba/best[height<=${quality}]`,
-        "--merge-output-format", "mp4",
+        "-f",
+        `bv*[ext=mp4][height<=${quality}]/bv*[height<=${quality}]+ba/best[height<=${quality}]`,
 
-        "--concurrent-fragments", "8",
+        "--merge-output-format", "mp4",
+        "--concurrent-fragments", "16",
         "--downloader", "aria2c",
         "--downloader-args", "aria2c:-x 8 -s 8 -k 1M",
 
@@ -158,18 +184,18 @@ cmd(
       if (fs.statSync(videoPath).size < 300 * 1024)
         throw new Error("Corrupted video");
 
-      /* ---------- SEND VIDEO ---------- */
+      /* -------- Send video -------- */
       await robin.sendMessage(
         from,
         {
           document: fs.readFileSync(videoPath),
           mimetype: "video/mp4",
-          fileName: `${safeFileName(title)}.mp4`,
+          fileName: `${safeFileName(title)}_${quality}p.mp4`,
         },
         { quoted: mek }
       );
 
-      /* ---------- CLEANUP ---------- */
+      /* -------- Cleanup -------- */
       fs.readdirSync(tempDir).forEach(f => {
         if (f.startsWith("xhamster_")) {
           fs.unlink(path.join(tempDir, f), () => {});
