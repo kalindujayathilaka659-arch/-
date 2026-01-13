@@ -10,7 +10,6 @@ const tempDir = path.resolve(__dirname, "../temp");
 
 if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
 
-/* ---------- helpers ---------- */
 function findFile(dir, ext) {
   return fs.readdirSync(dir).find(f => f.endsWith(ext));
 }
@@ -27,23 +26,28 @@ cmd(
     alias: ["ph", "pornhubdl"],
     ownerOnly: true,
     react: "💦",
-    desc: "Pornhub downloader (thumbnail first, then video)",
+    desc: "Pornhub downloader (thumbnail first, then video) with quality selector",
     category: "download",
     filename: __filename,
   },
   async (robin, mek, m, { from, q, reply }) => {
     try {
-      /* ---------- SAFE INPUT ---------- */
-      const query = typeof q === "string" ? q.trim() : "";
+      /* ---------- SAFE INPUT + QUALITY ---------- */
+      let quality = 720; // default
+      let query = typeof q === "string" ? q.trim() : "";
 
-      if (!query)
-        return reply("❌ Please send a Pornhub video link.");
+      const parts = query.split(/\s+/);
+      if (parts.length > 1) {
+        let first = parts[0].toLowerCase().replace("p", "");
+        if (["360","480","720","1080"].includes(first)) {
+          quality = parseInt(first);
+          query = parts.slice(1).join(" "); // rest is URL
+        }
+      }
 
-      if (!query.includes("pornhub.com"))
-        return reply("❌ Invalid Pornhub URL.");
-
-      if (!fs.existsSync(cookiesPath))
-        return reply("⚠️ Pornhub cookies not found in /cookies.");
+      if (!query) return reply("❌ Please send a Pornhub video link.");
+      if (!query.includes("pornhub.com")) return reply("❌ Invalid Pornhub URL.");
+      if (!fs.existsSync(cookiesPath)) return reply("⚠️ Pornhub cookies not found in /cookies.");
 
       const outputTemplate = path.join(tempDir, "pornhub_%(id)s.%(ext)s");
 
@@ -55,11 +59,9 @@ cmd(
         "--no-warnings",
         "--cookies", cookiesPath,
         "--ffmpeg-location", ffmpegPath,
-
         "--write-thumbnail",
         "--convert-thumbnails", "jpg",
         "--write-info-json",
-
         "-o", outputTemplate,
         query
       ];
@@ -71,31 +73,19 @@ cmd(
       const infoFile  = findFile(tempDir, ".info.json");
       const thumbFile = findFile(tempDir, ".jpg");
 
-      if (!infoFile)
-        throw new Error("Failed to fetch metadata.");
+      if (!infoFile) throw new Error("Failed to fetch metadata.");
 
-      const info = JSON.parse(
-        fs.readFileSync(path.join(tempDir, infoFile), "utf8")
-      );
+      const info = JSON.parse(fs.readFileSync(path.join(tempDir, infoFile), "utf8"));
 
-      /* ---------- METADATA ---------- */
       const title = info.title || "Pornhub Video";
       const duration = info.duration
         ? new Date(info.duration * 1000).toISOString().substr(11, 8)
         : "Unknown";
+      const views = info.view_count ? info.view_count.toLocaleString() : "Unknown";
+      const stars = Array.isArray(info.cast) && info.cast.length ? info.cast.join(", ") : "Unknown";
 
-      const views = info.view_count
-        ? info.view_count.toLocaleString()
-        : "Unknown";
+      const selectedQuality = info.height ? `${Math.min(info.height, quality)}p` : `${quality}p`;
 
-      const quality = info.height ? `${info.height}p` : "720p";
-
-      const stars =
-        Array.isArray(info.cast) && info.cast.length
-          ? info.cast.join(", ")
-          : "Unknown";
-
-      /* ---------- SEND THUMB + METADATA FIRST ---------- */
       if (thumbFile) {
         await robin.sendMessage(
           from,
@@ -108,7 +98,7 @@ cmd(
               `⭐ *Stars:* ${stars}\n` +
               `🕒 *Duration:* ${duration}\n` +
               `👁 *Views:* ${views}\n` +
-              `📦 *Quality:* ${quality}\n` +
+              `📦 *Quality:* ${selectedQuality}\n` +
               `🔗 *URL:* ${query}\n\n` +
               `📥 *Downloading video…*`,
           },
@@ -123,14 +113,11 @@ cmd(
         "--no-warnings",
         "--cookies", cookiesPath,
         "--ffmpeg-location", ffmpegPath,
-
-        "-f", "bv*[height<=720]+ba/best[height<=720]/best",
+        "-f", `bv*[height<=${quality}]+ba/best[height<=${quality}]/best`,
         "--merge-output-format", "mp4",
-
-        "--concurrent-fragments", "8",
+        "--concurrent-fragments", "16",
         "--downloader", "aria2c",
         "--downloader-args", "aria2c:-x 8 -s 8 -k 1M",
-
         "-o", outputTemplate,
         query
       ];
@@ -144,22 +131,19 @@ cmd(
 
       const videoPath = path.join(tempDir, videoFile);
 
-      /* ---------- SEND VIDEO ---------- */
       await robin.sendMessage(
         from,
         {
           document: fs.readFileSync(videoPath),
           mimetype: "video/mp4",
-          fileName: `${safeName(title)}.mp4`,
+          fileName: `${safeName(title)}_${selectedQuality}.mp4`,
         },
         { quoted: mek }
       );
 
       /* ---------- CLEANUP ---------- */
       fs.readdirSync(tempDir).forEach(f => {
-        if (f.startsWith("pornhub_")) {
-          fs.unlink(path.join(tempDir, f), () => {});
-        }
+        if (f.startsWith("pornhub_")) fs.unlink(path.join(tempDir, f), () => {});
       });
 
     } catch (err) {
@@ -168,6 +152,3 @@ cmd(
     }
   }
 );
-
-
-
