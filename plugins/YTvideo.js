@@ -195,7 +195,7 @@ cmd(
         retries: 5,
         downloader: "aria2c",
         downloaderArgs: ["-x", "8", "-s", "8", "-k", "1M"],
-        concurrentFragments: 8,
+        concurrentFragments: 16,
       };
 
       try {
