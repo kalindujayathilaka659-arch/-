@@ -21,6 +21,7 @@ module.exports = {
 
   OWNER_NUM: (process.env.OWNER_NUM || "94701981053").split(","),
 
+AI_MODEL: "gpt-5.2",
 AUTH_SYSTEM: true,
 AUTO_READ_STATUS: true,   // true = read status
 AUTO_LIKE_STATUS: true,   // true = like (heart/react) status
