@@ -251,17 +251,17 @@ cmd(
         "-map", "0:a:0?",
 
         "-vf", vf,
-        "-r", "30",
+        "-r", "60",
 
         "-c:v", "libx264",
         "-profile:v", "baseline",
         "-level", "3.1",
         "-pix_fmt", "yuv420p",
         "-preset", "veryfast",
-        "-crf", "23",
+        "-crf", "20",
 
         "-c:a", "aac",
-        "-b:a", "128k",
+        "-b:a", "320k",
         "-ac", "2",
         "-ar", "44100",
 
