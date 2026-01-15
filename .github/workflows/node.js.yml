@@ -1,0 +1,36 @@
+name: Node.js CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        node-version: [20.x]
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: ${{ matrix.node-version }}
+
+    - name: Install python dependencies
+      run: pip install yt-dlp && pip install yt-dlp --upgrade
+
+    - name: Install dependencies
+      run: npm install && npm i @whiskeysockets/baileys npm i openai
+
+    - name: Start application
+      run: npm start   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
