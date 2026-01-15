@@ -33,4 +33,4 @@ jobs:
       run: npm install && npm i @whiskeysockets/baileys npm i openai
 
     - name: Start application
-      run: npm start   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
+      run: npm start
