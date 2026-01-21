@@ -1,6 +1,8 @@
 const { cmd } = require("../command");
-const os = require("os"); // for CPU info
-const { isOwner } = require("../lib/auth");
+const os = require("os");
+const axios = require("axios");
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function formatUptime(seconds) {
   const h = Math.floor(seconds / 3600);
@@ -9,34 +11,74 @@ function formatUptime(seconds) {
   return `${h}h ${m}m ${s}s`;
 }
 
-// Function to calculate average CPU usage
-function getCpuUsage() {
-  const cpus = os.cpus();
+// ✅ More accurate CPU usage (sample-based)
+async function getCpuUsageSample(intervalMs = 350) {
+  const start = os.cpus();
+  await sleep(intervalMs);
+  const end = os.cpus();
 
-  let user = 0;
-  let nice = 0;
-  let sys = 0;
-  let idle = 0;
-  let irq = 0;
+  let idleDiff = 0;
+  let totalDiff = 0;
 
-  for (let cpu of cpus) {
-    user += cpu.times.user;
-    nice += cpu.times.nice;
-    sys += cpu.times.sys;
-    idle += cpu.times.idle;
-    irq += cpu.times.irq;
+  for (let i = 0; i < start.length; i++) {
+    const s = start[i].times;
+    const e = end[i].times;
+
+    const startTotal = s.user + s.nice + s.sys + s.idle + s.irq;
+    const endTotal = e.user + e.nice + e.sys + e.idle + e.irq;
+
+    totalDiff += endTotal - startTotal;
+    idleDiff += e.idle - s.idle;
   }
 
-  const total = user + nice + sys + idle + irq;
-  const usage = ((total - idle) / total) * 100;
+  const usage = totalDiff > 0 ? ((totalDiff - idleDiff) / totalDiff) * 100 : 0;
   return usage.toFixed(2);
+}
+
+// ✅ Download speed test using Cloudflare official endpoint
+async function getDownloadSpeedMbps() {
+  const UA =
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36";
+
+  const testUrls = [
+    "https://speed.cloudflare.com/__down?bytes=5000000", // 5MB
+    "https://speed.cloudflare.com/__down?bytes=2000000", // 2MB fallback
+  ];
+
+  for (const url of testUrls) {
+    try {
+      const start = Date.now();
+
+      const res = await axios.get(url, {
+        responseType: "arraybuffer",
+        timeout: 20000,
+        headers: {
+          "User-Agent": UA,
+          "Accept": "*/*",
+          "Cache-Control": "no-cache",
+        },
+      });
+
+      const bytes = res.data.length;
+      const seconds = (Date.now() - start) / 1000;
+
+      if (!bytes || seconds <= 0) return null;
+
+      const mbps = (bytes * 8) / seconds / 1_000_000;
+      return Number(mbps.toFixed(2));
+    } catch {
+      continue;
+    }
+  }
+
+  return null;
 }
 
 cmd(
   {
     pattern: "ping",
     ownerOnly: true,
-    desc: "Ping, uptime, RAM, and CPU usage (with image)",
+    desc: "Ping, uptime, RAM, CPU, + network speed (animated)",
     react: "🏓",
     category: "test",
   },
@@ -47,33 +89,58 @@ cmd(
 
       const start = Date.now();
 
-      await robin.sendMessage(
+      // ✅ Send one message and animate with edits
+      const pingMsg = await robin.sendMessage(
         chatId,
-        { text: "🏓 Pinging..." },
+        { text: "🏓 Pinging" },
         { quoted: mek }
       );
 
-      const latency = Date.now() - start;
-      const uptime = formatUptime(process.uptime());
+      const frames = ["🏓 Pinging.", "🏓 Pinging..", "🏓 Pinging..."];
+      let frameIndex = 0;
 
-      // ✅ FIXED RAM VALUES
+      const anim = setInterval(async () => {
+        try {
+          frameIndex = (frameIndex + 1) % frames.length;
+          await robin.sendMessage(chatId, { text: frames[frameIndex], edit: pingMsg.key });
+        } catch {}
+      }, 500);
+
+      // ✅ Latency check
+      const latency = Date.now() - start;
+
+      // ✅ Stats
+      const uptime = formatUptime(process.uptime());
       const usedRAM = process.memoryUsage().rss / 1024 / 1024;
       const totalRAM = os.totalmem() / 1024 / 1024;
 
-      const cpuUsage = getCpuUsage();
+      // ✅ run CPU + Net speed together
+      const [cpuUsage, downloadMbps] = await Promise.all([
+        getCpuUsageSample(350),
+        getDownloadSpeedMbps(),
+      ]);
+
+      clearInterval(anim);
+
+      // ✅ Edit ping msg final
+      await robin.sendMessage(
+        chatId,
+        { text: "✅ Pong! Sending status…", edit: pingMsg.key },
+        { quoted: mek }
+      );
 
       // 👇 Ghost MD image
       const imageUrl =
         "https://github.com/nadeelachamath-crypto/GHOST-SUPPORT/blob/main/ChatGPT%20Image%20Oct%2031,%202025,%2010_10_49%20PM.png?raw=true";
 
-      const message = `🏓 *PONG!*
-
-📶 *Latency:* ${latency}ms
-⏱ *Uptime:* ${uptime}
-🧠 *RAM:* ${usedRAM.toFixed(2)} MB / ${totalRAM.toFixed(2)} MB
-⚙️ *CPU Usage:* ${cpuUsage}%
-
-👻 *Ghost MD is running smoothly!*`;
+      const message =
+        `🏓 *PONG!*\n\n` +
+        `📶 *Latency:* ${latency}ms\n` +
+        `⏱ *Uptime:* ${uptime}\n` +
+        `🧠 *RAM:* ${usedRAM.toFixed(2)} MB / ${totalRAM.toFixed(2)} MB\n` +
+        `⚙️ *CPU Usage:* ${cpuUsage}%\n` +
+        `📡 *Net Speed:* ${downloadMbps ? `${downloadMbps} Mbps` : "Blocked/No access"}\n\n` +
+        `👻 *Ghost MD is running smoothly!*`;
 
       await robin.sendMessage(
         chatId,
@@ -83,7 +150,6 @@ cmd(
         },
         { quoted: mek }
       );
-
     } catch (err) {
       console.error("Ping error:", err);
       reply(`❌ Error during ping.\n\`\`\`\n${err.message}\n\`\`\``);
