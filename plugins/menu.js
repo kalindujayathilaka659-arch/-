@@ -59,7 +59,9 @@ cmd(
     👻 ${config.PREFIX}xhamster <xhamster url>
     👻 ${config.PREFIX}pornhub <pornhub url>
     👻 ${config.PREFIX}pornclip
-    👻 ${config.PREFIX}eporner
+    👻 ${config.PREFIX}eporner <eporner url>
+    👻 ${config.PREFIX}pornpic <tag>
+    👻 ${config.PREFIX}porngal <pornpic gallery url>
     
 | _*DOWNLOAD COMMANDS*_ |
     👻 ${config.PREFIX}mega <mrga.nz url>
