@@ -7,16 +7,15 @@ const ffmpegPath = require("ffmpeg-static");
 
 /* ================= CONFIG ================= */
 const ALLOWED_QUALITIES = [360, 480, 720, 1080];
-const DEFAULT_QUALITY = 720;       // ✅ default 720p
-const MAX_CAP_QUALITY = 1080;      // ✅ allow up to 1080p
+const DEFAULT_QUALITY = 720;
+const MAX_CAP_QUALITY = 1080;
+
+// ✅ FORCE FINAL MP4 AUDIO BITRATE
+const FORCE_AUDIO_BITRATE = "320k"; // ✅ 320kbps AAC
 
 /* ================= HELPERS ================= */
-function findFile(dir, ext) {
-  return fs.readdirSync(dir).find((f) => f.endsWith(ext));
-}
-
 function safeFileName(name, max = 80) {
-  return name
+  return (name || "video")
     .replace(/[<>:"/\\|?*\x00-\x1F]/g, "")
     .replace(/\s+/g, " ")
     .trim()
@@ -35,23 +34,26 @@ function isValidXHamsterVideo(url) {
   return typeof url === "string" && url.includes("xhamster.com/videos/");
 }
 
-// ✅ exec wrapper (SHOW REAL ERRORS)
-function execYtDlp(args, label = "yt-dlp") {
+function tailLines(text = "", maxLines = 10) {
+  const lines = String(text).split("\n").filter(Boolean);
+  return lines.slice(-maxLines).join("\n");
+}
+
+// ✅ Universal exec wrapper (captures stderr/stdout)
+function execBin(bin, args, label = "EXEC") {
   return new Promise((resolve, reject) => {
     execFile(
-      "yt-dlp",
+      bin,
       args,
-      { maxBuffer: 1024 * 1024 * 50 }, // 50MB output buffer
+      { maxBuffer: 1024 * 1024 * 50 },
       (error, stdout, stderr) => {
         if (error) {
+          error._stderr = stderr || "";
+          error._stdout = stdout || "";
           console.error(`\n❌ ${label} FAILED`);
           console.error("Exit code:", error.code);
-          console.error("Signal:", error.signal);
-          console.error("STDERR:\n", stderr || "(empty)");
-          console.error("STDOUT:\n", stdout || "(empty)");
-
-          error._stderr = stderr;
-          error._stdout = stdout;
+          console.error("STDERR:\n", error._stderr || "(empty)");
+          console.error("STDOUT:\n", error._stdout || "(empty)");
           return reject(error);
         }
         resolve({ stdout, stderr });
@@ -60,21 +62,31 @@ function execYtDlp(args, label = "yt-dlp") {
   });
 }
 
-function detectReason(err) {
-  const text = ((err?._stderr || "") + "\n" + (err?._stdout || "")).toLowerCase();
+// ✅ yt-dlp wrapper
+function execYtDlp(args, label = "yt-dlp") {
+  return execBin("yt-dlp", args, label);
+}
 
-  if (text.includes("cookie") || text.includes("cookies")) return "Cookies expired / invalid";
-  if (text.includes("403")) return "403 Forbidden (blocked)";
-  if (text.includes("429")) return "Rate-limited (429) — try later";
-  if (text.includes("ffmpeg")) return "FFmpeg merge failed";
-  if (text.includes("aria2c") && (text.includes("not found") || text.includes("no such file")))
-    return "aria2c not installed / not found";
-  if (text.includes("requested format is not available") || text.includes("no video formats"))
+// ✅ Better reason detector
+function detectReason(err) {
+  const t = ((err?._stderr || "") + "\n" + (err?._stdout || "")).toLowerCase();
+
+  if (t.includes("cookies") || t.includes("cookie")) return "Cookies expired / invalid";
+  if (t.includes("sign in") || t.includes("login")) return "Login required / blocked";
+  if (t.includes("private")) return "Private video / restricted";
+  if (t.includes("403") || t.includes("forbidden")) return "403 Forbidden (blocked)";
+  if (t.includes("404") || t.includes("not found")) return "404 Not Found (removed)";
+  if (t.includes("429") || t.includes("too many requests")) return "Rate limited (429)";
+  if (t.includes("cloudflare") || t.includes("captcha")) return "Cloudflare / Captcha blocked";
+  if (t.includes("unable to download webpage")) return "Blocked / site changed / network issue";
+  if (t.includes("name resolution") || t.includes("enotfound")) return "DNS error / no internet";
+  if (t.includes("timed out") || t.includes("timeout")) return "Timeout (slow network / blocked)";
+  if (t.includes("tls") || t.includes("ssl")) return "SSL/TLS handshake failed";
+  if (t.includes("ffmpeg")) return "FFmpeg merge failed";
+  if (t.includes("aria2c") && (t.includes("not found") || t.includes("no such file")))
+    return "aria2c not installed / missing";
+  if (t.includes("requested format is not available") || t.includes("no video formats"))
     return "Requested quality not available";
-  if (text.includes("private") || text.includes("login"))
-    return "Private / login required";
-  if (text.includes("not available") || text.includes("removed"))
-    return "Video removed / unavailable";
 
   return "Unknown";
 }
@@ -85,7 +97,7 @@ cmd(
     pattern: "xhamster",
     ownerOnly: true,
     react: "🍑",
-    desc: "Download XHamster video with quality selector (default 720p)",
+    desc: "Download XHamster video with quality selector (Default 720p + 320kbps audio)",
     category: "nsfw",
     filename: __filename,
   },
@@ -102,26 +114,24 @@ cmd(
 
       const parts = q.trim().split(/\s+/);
       if (parts.length > 1) {
-        let first = parts[0].toLowerCase().replace("p", ""); // allow 1080p
-        if (ALLOWED_QUALITIES.includes(parseInt(first))) {
-          quality = parseInt(first);
+        const first = parts[0].toLowerCase().replace("p", "");
+        if (ALLOWED_QUALITIES.includes(parseInt(first, 10))) {
+          quality = parseInt(first, 10);
           url = parts.slice(1).join(" ");
         }
       }
 
-      // ✅ HARD CAP (max 1080)
       if (quality > MAX_CAP_QUALITY) quality = MAX_CAP_QUALITY;
 
       if (!isValidXHamsterVideo(url)) {
         return reply(
           "❌ Unsupported XHamster URL\n\n" +
-            "✅ Use a *direct video link*, example:\n" +
-            "https://xhamster.com/videos/video-name-1234567"
+            "✅ Example:\nhttps://xhamster.com/videos/video-name-1234567"
         );
       }
 
       /* -------- Paths -------- */
-      tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "xhamster-")); // ✅ unique temp dir
+      tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "xhamster-"));
       const cookiesFile = path.join(__dirname, "../cookies/xhamster.txt");
 
       if (!fs.existsSync(cookiesFile)) {
@@ -130,44 +140,51 @@ cmd(
 
       const outputTemplate = path.join(tempDir, "xhamster_%(id)s.%(ext)s");
 
+      // ✅ Browser headers help with blocks
+      const UA =
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
+
       /* =====================================================
-         1️⃣ METADATA + THUMBNAIL (NO VIDEO)
+         1️⃣ METADATA (JSON)
       ===================================================== */
       const metaArgs = [
-        "--skip-download",
-        "--write-thumbnail",
-        "--convert-thumbnails",
-        "jpg",
-        "--write-info-json",
-        "--ffmpeg-location",
-        ffmpegPath,
+        "--dump-single-json",
+        "--no-warnings",
+        "--no-playlist",
         "--cookies",
         cookiesFile,
-        "-o",
-        outputTemplate,
+        "--ffmpeg-location",
+        ffmpegPath,
+
+        "--add-header",
+        `User-Agent:${UA}`,
+        "--add-header",
+        "Accept-Language:en-US,en;q=0.9",
+        "--add-header",
+        "Referer:https://xhamster.com/",
+
         url,
       ];
 
+      let info;
+
       try {
-        await execYtDlp(metaArgs, "XHamster META");
+        const { stdout } = await execYtDlp(metaArgs, "XHamster META");
+        info = JSON.parse(stdout);
       } catch (e) {
         const reason = detectReason(e);
-        return reply(`❌ Metadata failed.\n🧠 Reason: *${reason}*`);
+        const snippet = tailLines(e?._stderr || e?._stdout || "", 8);
+
+        return reply(
+          `❌ Metadata failed.\n🧠 Reason: *${reason}*\n\n` +
+            `📌 Details:\n\`\`\`\n${snippet || "No output"}\n\`\`\``
+        );
       }
 
-      const infoFile = findFile(tempDir, ".info.json");
-      const thumbFile = findFile(tempDir, ".jpg");
-      if (!infoFile) throw new Error("Metadata missing");
-
-      const info = JSON.parse(fs.readFileSync(path.join(tempDir, infoFile), "utf8"));
-
       /* -------- Quality availability -------- */
-      const heights =
-        info.formats?.filter((f) => f.height).map((f) => f.height) || [];
-
+      const heights = info.formats?.filter((f) => f.height).map((f) => f.height) || [];
       const uniqueHeights = [...new Set(heights)].sort((a, b) => a - b);
 
-      // ✅ maximum available but capped at 1080
       let maxAvailable = uniqueHeights.length ? Math.max(...uniqueHeights) : quality;
       maxAvailable = Math.min(maxAvailable, MAX_CAP_QUALITY);
 
@@ -185,16 +202,16 @@ cmd(
       const title = info.title || "XHamster Video";
       const channel = info.uploader || "XHamster";
       const views = info.view_count ? info.view_count.toLocaleString() : "Unknown";
-      const stars = Array.isArray(info.cast) && info.cast.length ? info.cast.join(", ") : "Unknown";
+      const stars =
+        Array.isArray(info.cast) && info.cast.length ? info.cast.join(", ") : "Unknown";
       const duration = formatDuration(info.duration);
+      const thumbUrl = info.thumbnail;
 
-      /* -------- Send thumbnail + info -------- */
-      if (thumbFile) {
+      if (thumbUrl) {
         await robin.sendMessage(
           from,
           {
-            image: fs.readFileSync(path.join(tempDir, thumbFile)),
-            mimetype: "image/jpeg",
+            image: { url: thumbUrl },
             caption:
               `👻 *GHOST XHAMSTER DOWNLOADER*\n\n` +
               `🎥 *Title:* ${title}\n` +
@@ -203,7 +220,8 @@ cmd(
               `⭐ *Stars:* ${stars}\n` +
               `👁 *Views:* ${views}\n` +
               `📺 *Available:* ${availableQualities || "Unknown"}\n` +
-              `📦 *Selected:* ${quality}p (Default 720p)\n\n` +
+              `📦 *Selected:* ${quality}p (Default 720p)\n` +
+              `🎧 *Audio:* ${FORCE_AUDIO_BITRATE} (AAC)\n\n` +
               `📥 *Downloading video…*`,
           },
           { quoted: mek }
@@ -211,13 +229,14 @@ cmd(
       }
 
       /* =====================================================
-         2️⃣ VIDEO DOWNLOAD (<= 1080p)
+         2️⃣ VIDEO DOWNLOAD
       ===================================================== */
 
-      // ✅ format rule
-      const formatRule = `bv*[ext=mp4][height<=${quality}]+ba/best[height<=${quality}]`;
+      const formatRule =
+        `bv*[ext=mp4][height<=${quality}]+ba[ext=m4a]/` +
+        `b[ext=mp4][height<=${quality}]/best[height<=${quality}]`;
 
-      const videoArgsAria2 = [
+      const baseVideoArgs = [
         "--no-warnings",
         "--continue",
         "--retries",
@@ -228,52 +247,38 @@ cmd(
         "20",
         "--ffmpeg-location",
         ffmpegPath,
+        "--cookies",
+        cookiesFile,
+
+        "--add-header",
+        `User-Agent:${UA}`,
+        "--add-header",
+        "Accept-Language:en-US,en;q=0.9",
+        "--add-header",
+        "Referer:https://xhamster.com/",
 
         "-f",
         formatRule,
-
         "--merge-output-format",
         "mp4",
+
+        "-o",
+        outputTemplate,
+        url,
+      ];
+
+      // aria2c boost
+      const videoArgsAria2 = [
+        ...baseVideoArgs,
         "--concurrent-fragments",
         "16",
         "--downloader",
         "aria2c",
         "--downloader-args",
         "aria2c:-x 8 -s 8 -k 1M",
-
-        "--cookies",
-        cookiesFile,
-        "-o",
-        outputTemplate,
-        url,
       ];
 
-      const videoArgsNormal = [
-        "--no-warnings",
-        "--continue",
-        "--retries",
-        "infinite",
-        "--fragment-retries",
-        "infinite",
-        "--socket-timeout",
-        "20",
-        "--ffmpeg-location",
-        ffmpegPath,
-
-        "-f",
-        formatRule,
-
-        "--merge-output-format",
-        "mp4",
-
-        "--cookies",
-        cookiesFile,
-        "-o",
-        outputTemplate,
-        url,
-      ];
-
-      // Try aria2c first, fallback if missing
+      // Try aria2c first
       try {
         await execYtDlp(videoArgsAria2, "XHamster VIDEO (aria2c)");
       } catch (e) {
@@ -282,32 +287,70 @@ cmd(
         if (reason.includes("aria2c")) {
           console.log("⚠ aria2c missing -> retrying without aria2c...");
           try {
-            await execYtDlp(videoArgsNormal, "XHamster VIDEO (fallback)");
+            await execYtDlp(baseVideoArgs, "XHamster VIDEO (fallback)");
           } catch (e2) {
             const reason2 = detectReason(e2);
-            return reply(`❌ Download failed.\n🧠 Reason: *${reason2}*`);
+            const snippet2 = tailLines(e2?._stderr || e2?._stdout || "", 8);
+
+            return reply(
+              `❌ Download failed.\n🧠 Reason: *${reason2}*\n\n` +
+                `📌 Details:\n\`\`\`\n${snippet2 || "No output"}\n\`\`\``
+            );
           }
         } else {
-          return reply(`❌ Download failed.\n🧠 Reason: *${reason}*`);
+          const snippet = tailLines(e?._stderr || e?._stdout || "", 8);
+          return reply(
+            `❌ Download failed.\n🧠 Reason: *${reason}*\n\n` +
+              `📌 Details:\n\`\`\`\n${snippet || "No output"}\n\`\`\``
+          );
         }
       }
 
-      const videoFile = fs
+      /* -------- Find mp4 -------- */
+      const downloadedMp4 = fs
         .readdirSync(tempDir)
         .find((f) => f.endsWith(".mp4") && !f.includes(".part"));
 
-      if (!videoFile) throw new Error("Video missing");
+      if (!downloadedMp4) throw new Error("Video missing");
 
-      const videoPath = path.join(tempDir, videoFile);
+      const downloadedPath = path.join(tempDir, downloadedMp4);
+      if (fs.statSync(downloadedPath).size < 300 * 1024) throw new Error("Corrupted video");
 
-      if (!fs.existsSync(videoPath)) throw new Error("Video file not found");
-      if (fs.statSync(videoPath).size < 300 * 1024) throw new Error("Corrupted video");
+      /* =====================================================
+         3️⃣ FORCE AUDIO BITRATE 320k (AAC)
+      ===================================================== */
+      const finalPath = path.join(tempDir, `final_${quality}p.mp4`);
+
+      try {
+        await execBin(
+          ffmpegPath,
+          [
+            "-y",
+            "-i",
+            downloadedPath,
+            "-c:v",
+            "copy",
+            "-c:a",
+            "aac",
+            "-b:a",
+            FORCE_AUDIO_BITRATE,
+            "-movflags",
+            "+faststart",
+            finalPath,
+          ],
+          "FFmpeg AUDIO 320K"
+        );
+      } catch (e) {
+        console.log("⚠ FFmpeg audio re-encode failed, sending original file...");
+      }
+
+      const sendPath = fs.existsSync(finalPath) ? finalPath : downloadedPath;
 
       /* -------- Send video -------- */
       await robin.sendMessage(
         from,
         {
-          document: fs.readFileSync(videoPath),
+          document: fs.readFileSync(sendPath),
           mimetype: "video/mp4",
           fileName: `${safeFileName(title)}_${quality}p.mp4`,
         },
