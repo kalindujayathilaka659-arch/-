@@ -60,7 +60,7 @@ cmd(
     👻 ${config.PREFIX}pornhub <pornhub url>
     👻 ${config.PREFIX}pornclip
     👻 ${config.PREFIX}eporner <eporner url>
-    👻 ${config.PREFIX}pornpic <tag>
+    👻 ${config.PREFIX}pornpics <tag>
     👻 ${config.PREFIX}porngal <pornpic gallery url>
     
 | _*DOWNLOAD COMMANDS*_ |
