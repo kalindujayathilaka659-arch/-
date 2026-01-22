@@ -4,7 +4,7 @@ const cheerio = require("cheerio");
 
 cmd(
   {
-    pattern: "pornpic",
+    pattern: "pornpics",
     ownerOnly: true,
     react: "🍑",
     desc: "Get 3 NSFW images (Pornpics)",
@@ -21,7 +21,7 @@ cmd(
             .replace(/[^a-z0-9\s-]/g, "") // remove symbols
             .replace(/\s+/g, "-")         // spaces -> "-"
             .replace(/-+/g, "-")          // collapse multiple "-"
-        : "hentai";
+        : "oiled ass";
 
       if (!tag) return reply("❌ Invalid tag.");
 
@@ -31,6 +31,8 @@ cmd(
       const urlsToTry = [
         `${base}/tags/${encodeURIComponent(tag)}/`, // ✅ tags url
         `${base}/${encodeURIComponent(tag)}/`,      // ✅ normal url
+        `${base}/pornstars/${encodeURIComponent(tag)}/`,      // ✅ porn stars url
+        `${base}/channels/${encodeURIComponent(tag)}/`,      // ✅ porn channels url
       ];
 
       // ✅ Cloudflare-safe headers
@@ -47,7 +49,7 @@ cmd(
       let res = null;
       let usedUrl = null;
 
-      // 🌐 TRY BOTH URL TYPES
+      // 🌐 TRY ALL URL TYPES
       for (const tryUrl of urlsToTry) {
         try {
           const r = await axios.get(tryUrl, {
