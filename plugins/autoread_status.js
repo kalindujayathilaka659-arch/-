@@ -38,7 +38,6 @@ function getTextMessage(m) {
 
 /* ================= PREFIX SUPPORT ================= */
 function getPrefixes() {
-  // support: PREFIX = "." OR PREFIX = [".", "!", "/"]
   const p = config.PREFIX ?? ".";
   return Array.isArray(p) ? p : [String(p)];
 }
@@ -54,27 +53,22 @@ function isBotCommand(text = "") {
 /* ================= FAKE TYPING ================= */
 async function fakeTyping(client, jid) {
   try {
-    // ✅ allow "true" / 1 / true
     if (!(config.AUTO_FAKE_TYPING == true)) return;
 
     const min = Number(config.FAKE_TYPING_DELAY_MIN ?? 800);
     const max = Number(config.FAKE_TYPING_DELAY_MAX ?? 2000);
-
     const delay = Math.floor(min + Math.random() * (max - min + 1));
 
-    // ✅ important for some chats
+    // ✅ helps in some chats
     try {
       await client.presenceSubscribe(jid);
     } catch {}
 
-    // ✅ show typing...
     await client.sendPresenceUpdate("composing", jid);
     await sleep(delay);
-
-    // ✅ stop typing
     await client.sendPresenceUpdate("paused", jid);
   } catch {
-    // ignore typing errors
+    // ignore
   }
 }
 
@@ -153,9 +147,17 @@ module.exports = async (client) => {
         const text = getTextMessage(m);
         const command = isBotCommand(text);
 
-        // ✅ if auto read = ON → typing + read everything
+        /**
+         * ✅ MODE 1:
+         * AUTO_READ_MESSAGES = true
+         * - Read ALL messages
+         * - Fake typing ONLY for commands
+         */
         if (AUTO_READ_MESSAGES) {
-          await fakeTyping(client, remoteJid);
+          if (command) {
+            await fakeTyping(client, remoteJid);
+            console.log(`⌨️ Fake typing (COMMAND) | ${remoteJid} | ${text}`);
+          }
 
           await client.readMessages([
             {
@@ -169,7 +171,12 @@ module.exports = async (client) => {
           continue;
         }
 
-        // ✅ if auto read = OFF → typing ONLY for commands
+        /**
+         * ✅ MODE 2:
+         * AUTO_READ_MESSAGES = false
+         * - Don't read
+         * - Fake typing ONLY for commands
+         */
         if (!AUTO_READ_MESSAGES && command) {
           await fakeTyping(client, remoteJid);
           console.log(`⌨️ Fake typing (COMMAND) | ${remoteJid} | ${text}`);
