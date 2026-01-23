@@ -4,29 +4,9 @@ const fs = require("fs-extra");
 const path = require("path");
 const { execFile } = require("child_process");
 
-const PYTHON_BIN = process.env.PYTHON_BIN || "python"; // use "python3" if needed
-
-// ---------- npm ffmpeg (no system install needed) ----------
-let FFMPEG_BIN = process.env.FFMPEG_BIN;
-
-if (!FFMPEG_BIN) {
-  try {
-    FFMPEG_BIN = require("ffmpeg-static");
-  } catch {}
-}
-
-if (!FFMPEG_BIN) {
-  try {
-    FFMPEG_BIN = require("@ffmpeg-installer/ffmpeg").path;
-  } catch {}
-}
-
-if (!FFMPEG_BIN) {
-  FFMPEG_BIN = "ffmpeg";
-}
-// ----------------------------------------------------------
-
 /* ================= CONFIG ================= */
+const PYTHON_BIN = process.env.PYTHON_BIN || "python"; // use python3 if needed
+
 const MAX_DURATION_SECONDS = 1800; // 30 min
 const MAX_FILE_MB = 95;
 
@@ -36,11 +16,25 @@ const ALLOWED_QUALITIES = new Set([144, 240, 360, 480, 720, 1080]);
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
 
+/* ================= FFMPEG PATH (npm) ================= */
+let FFMPEG_BIN = process.env.FFMPEG_BIN;
+
+if (!FFMPEG_BIN) {
+  try {
+    FFMPEG_BIN = require("ffmpeg-static");
+  } catch {}
+}
+if (!FFMPEG_BIN) {
+  try {
+    FFMPEG_BIN = require("@ffmpeg-installer/ffmpeg").path;
+  } catch {}
+}
+if (!FFMPEG_BIN) FFMPEG_BIN = "ffmpeg";
+
 /* ================= COOKIES AUTO FIND ================= */
 const COOKIE_CANDIDATES = [
   path.join(process.cwd(), "cookies/youtube_cookies.txt"),
   path.join(__dirname, "../cookies/youtube_cookies.txt"),
-  // ✅ your workspace path
   "/workspaces/-/cookies/youtube_cookies.txt",
 ];
 
@@ -49,6 +43,7 @@ function findCookiesFile() {
 }
 
 /* ================= HELPERS ================= */
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const s = (v) => (v == null ? "" : String(v));
 
 function waSafe(text, maxLen = 900) {
@@ -56,38 +51,15 @@ function waSafe(text, maxLen = 900) {
   try {
     t = t.normalize("NFKC");
   } catch {}
-  t = t.replace(/[\u0000-\u001F\u007F]/g, ""); // remove control chars
+  t = t.replace(/[\u0000-\u001F\u007F]/g, "");
   t = t.replace(/\*/g, "✱").replace(/_/g, "ˍ").replace(/~/g, "˷").replace(/`/g, "ˋ");
   t = t.replace(/\s+/g, " ").trim();
   if (t.length > maxLen) t = t.slice(0, maxLen - 1) + "…";
   return t;
 }
 
-function tailLines(text = "", n = 14) {
+function tailLines(text = "", n = 16) {
   return String(text).split("\n").filter(Boolean).slice(-n).join("\n");
-}
-
-function detectReasonFromText(text = "") {
-  const t = String(text).toLowerCase();
-
-  if (t.includes("sign in to confirm") || t.includes("not a bot"))
-    return "YouTube bot-check (cookies expired / not accepted)";
-  if (t.includes("signature solving failed") || t.includes("challenge solving failed"))
-    return "EJS signature solver failed (JS runtime missing)";
-  if (t.includes("private video") || t.includes("login required"))
-    return "Login required / Private video";
-  if (t.includes("429") || t.includes("too many requests"))
-    return "429 Rate limited";
-  if (t.includes("403") || t.includes("forbidden"))
-    return "403 Forbidden (blocked)";
-  if (t.includes("video unavailable") || t.includes("not available"))
-    return "Video unavailable / removed";
-  if (t.includes("downloaded file is empty"))
-    return "Downloaded file empty (blocked / cookies issue)";
-  if (t.includes("ffmpeg"))
-    return "FFmpeg conversion error";
-
-  return "Unknown";
 }
 
 function run(bin, args, cwd = process.cwd()) {
@@ -95,7 +67,7 @@ function run(bin, args, cwd = process.cwd()) {
     execFile(
       bin,
       args,
-      { cwd, windowsHide: true, maxBuffer: 1024 * 1024 * 50 }, // 50MB buffer
+      { cwd, windowsHide: true, maxBuffer: 1024 * 1024 * 80 }, // 80MB buffer
       (err, stdout, stderr) => {
         if (err) {
           err.stdout = stdout || "";
@@ -126,8 +98,7 @@ function isYoutubeUrl(str) {
 }
 
 function getArgsText(m, q) {
-  const qStr = s(q);
-  if (qStr) return qStr;
+  if (q) return s(q);
 
   const body =
     s(m?.body) ||
@@ -139,7 +110,6 @@ function getArgsText(m, q) {
   return body.replace(/^[.!/#]?\s*video\b/i, "").trim();
 }
 
-// ".video 480 <query>" OR ".video <query>" (default 720)
 function parseQualityFirst(argsText) {
   const text = s(argsText).trim();
   if (!text) return { quality: DEFAULT_QUALITY, query: "" };
@@ -193,16 +163,35 @@ async function findDownloadedFile(dir) {
   return candidates[0]?.full || null;
 }
 
-/* ================= YT-DLP DOWNLOAD WITH RETRY ================= */
-async function ytdlpDownload(videoUrl, outTpl, quality, cookiesPath) {
-  // ✅ try different clients (helps bot-check sometimes)
-  const clients = ["android", "web", "tv"];
+/* ================= ERROR REASON ================= */
+function detectReasonFromText(text = "") {
+  const t = String(text).toLowerCase();
 
-  // ✅ format: prefer mp4 when possible, fallback to best
+  if (t.includes("sign in to confirm") || t.includes("not a bot"))
+    return "YouTube bot-check (cookies expired / not accepted)";
+  if (t.includes("signature solving failed") || t.includes("challenge solving failed"))
+    return "Signature solver failed (EJS / JS runtime issue)";
+  if (t.includes("private video") || t.includes("login required"))
+    return "Login required / Private video";
+  if (t.includes("429") || t.includes("too many requests"))
+    return "429 Rate limited";
+  if (t.includes("403") || t.includes("forbidden"))
+    return "403 Forbidden (blocked)";
+  if (t.includes("video unavailable") || t.includes("not available"))
+    return "Video unavailable / removed";
+  if (t.includes("downloaded file is empty"))
+    return "Downloaded file empty (blocked / cookie issue)";
+  if (t.includes("ffmpeg"))
+    return "FFmpeg conversion error";
+
+  return "Unknown";
+}
+
+/* ================= yt-dlp DOWNLOAD (BEST QUALITY) ================= */
+async function ytdlpDownload(videoUrl, outTpl, quality, cookiesPath) {
+  const clients = ["android", "web", "tv"];
   const formatRule =
-    `bv*[height<=${quality}][ext=mp4]+ba[ext=m4a]/` +
-    `bv*[height<=${quality}]+ba/` +
-    `b[height<=${quality}]/best[height<=${quality}]`;
+    `bv*[height<=${quality}]+ba/best[height<=${quality}]/best`; // ✅ best possible (vp9 ok)
 
   let lastErr = null;
 
@@ -221,14 +210,11 @@ async function ytdlpDownload(videoUrl, outTpl, quality, cookiesPath) {
         "--user-agent", UA,
         "--referer", "https://www.youtube.com/",
 
-        // ✅ EJS signature solver
         "--remote-components", "ejs:github",
         "--js-runtimes", "node",
 
-        // ✅ client
         "--extractor-args", `youtube:player_client=${client}`,
 
-        // limits
         "--match-filter", `duration <= ${MAX_DURATION_SECONDS}`,
         "--max-filesize", `${MAX_FILE_MB}M`,
 
@@ -241,7 +227,7 @@ async function ytdlpDownload(videoUrl, outTpl, quality, cookiesPath) {
       }
 
       await run(PYTHON_BIN, ["-m", "yt_dlp", ...args], process.cwd());
-      return { clientUsed: client }; // success
+      return client;
     } catch (e) {
       lastErr = e;
       continue;
@@ -249,6 +235,56 @@ async function ytdlpDownload(videoUrl, outTpl, quality, cookiesPath) {
   }
 
   throw lastErr || new Error("yt-dlp failed");
+}
+
+/* ================= COMPRESS TO FIT (KEEP QUALITY) ================= */
+async function compressToFit(inputFile, outFile, quality, maxMb) {
+  const CRF_TRIES = [18, 19, 20, 21, 22, 24, 26, 28];
+  const AUDIO_K = 160; // ✅ better than 128 but still small
+
+  // ✅ FIXED FILTER (escape comma)
+  const vf = `scale=-2:min(${quality}\\,ih)`;
+
+  for (const crf of CRF_TRIES) {
+    const args = [
+      "-y",
+      "-i", inputFile,
+
+      "-map", "0:v:0",
+      "-map", "0:a:0?",
+
+      "-vf", vf,
+      "-r", "30",
+
+      "-c:v", "libx264",
+      "-preset", "slow",
+      "-crf", String(crf),
+      "-profile:v", "main",
+      "-pix_fmt", "yuv420p",
+
+      "-c:a", "aac",
+      "-b:a", `${AUDIO_K}k`,
+      "-ac", "2",
+      "-ar", "44100",
+
+      "-movflags", "+faststart",
+      outFile,
+    ];
+
+    await run(FFMPEG_BIN, args, process.cwd());
+
+    const st = await fs.stat(outFile);
+    const sizeMB = st.size / (1024 * 1024);
+
+    if (sizeMB <= maxMb) {
+      return { crfUsed: crf, sizeMB };
+    }
+
+    await sleep(200);
+  }
+
+  const st = await fs.stat(outFile);
+  return { crfUsed: CRF_TRIES[CRF_TRIES.length - 1], sizeMB: st.size / (1024 * 1024) };
 }
 
 /* ================= COMMAND ================= */
@@ -277,23 +313,20 @@ cmd(
 
       if (!(await ffmpegOk())) {
         return reply(
-          "❌ FFmpeg (npm) not found.\nInstall:\n`npm i ffmpeg-static`\n(or `npm i @ffmpeg-installer/ffmpeg`)"
+          "❌ FFmpeg not found.\nInstall:\n`npm i ffmpeg-static`\n(or `npm i @ffmpeg-installer/ffmpeg`)"
         );
       }
 
       await fs.ensureDir(tempDir);
 
-      // ✅ cookies file
       const COOKIES_PATH = findCookiesFile();
       if (!COOKIES_PATH) {
         await fs.remove(tempDir);
         return reply(
-          "❌ YouTube cookies not found!\n\n✅ Put cookies in:\n" +
-            "• /cookies/youtube_cookies.txt\nor\n• /cookies/yt.txt"
+          "❌ YouTube cookies not found!\n\nPut cookies in:\n• /cookies/youtube_cookies.txt"
         );
       }
 
-      // Meta for thumbnail
       const search = await ytsr(query);
       const info = search?.videos?.[0] || null;
 
@@ -306,39 +339,34 @@ cmd(
         ? s(query).trim()
         : `https://www.youtube.com/watch?v=${s(info.videoId)}`;
 
-      // Duration limit
       const totalSeconds = parseDurationToSeconds(info?.timestamp);
       if (totalSeconds && totalSeconds > MAX_DURATION_SECONDS) {
         await fs.remove(tempDir);
         return reply("⏱️ Video limit is 30 minutes.");
       }
 
-      // Send thumbnail + meta
       if (info?.thumbnail) {
         const caption =
           `🎥 *${waSafe(info?.title || "YouTube Video")}*\n` +
           `📺 *Channel:* ${waSafe(info?.author?.name || info?.author || "Unknown")}\n` +
           `🕒 *Duration:* ${waSafe(info?.timestamp || "Unknown")}\n` +
           `👁 *Views:* ${formatViews(info?.views)}\n` +
-          `📅 *Uploaded:* ${waSafe(info?.ago || "Unknown")}\n` +
           `📦 *Quality:* ${quality}p\n` +
           `🍪 Cookies: ✅ Loaded\n\n` +
-          `⏳ Downloading…`;
+          `⏳ Downloading best quality…`;
 
         await robin.sendMessage(from, { image: { url: info.thumbnail }, caption }, { quoted: mek });
       }
 
-      // 1) Download with yt-dlp (python) + EJS + cookies
+      // ✅ Download best quality first
       const outTpl = path.join(tempDir, "input.%(ext)s");
 
       let clientUsed = "unknown";
       try {
-        const r = await ytdlpDownload(videoUrl, outTpl, quality, COOKIES_PATH);
-        clientUsed = r.clientUsed;
+        clientUsed = await ytdlpDownload(videoUrl, outTpl, quality, COOKIES_PATH);
       } catch (e) {
         const out = (e?.stderr || "") + "\n" + (e?.stdout || "") + "\n" + (e?.message || "");
         const reason = detectReasonFromText(out);
-
         await fs.remove(tempDir);
         return reply(
           `❌ Download failed.\n🧠 Reason: *${reason}*\n` +
@@ -352,57 +380,35 @@ cmd(
         return reply("❌ Download failed (no file created).");
       }
 
-      // 2) Convert to WhatsApp-playable MP4 (H.264 baseline + AAC 320k + faststart)
+      // ✅ Compress to WhatsApp MP4 (keep quality, fit size)
       const waMp4 = path.join(tempDir, "wa.mp4");
 
-      const vf = `scale=-2:'min(${quality},ih)'`;
+      const { crfUsed, sizeMB } = await compressToFit(inputFile, waMp4, quality, MAX_FILE_MB);
 
-      const ffArgs = [
-        "-y",
-        "-i", inputFile,
-
-        "-map", "0:v:0",
-        "-map", "0:a:0?",
-
-        "-vf", vf,
-        "-r", "30", // ✅ smaller than 60, still smooth
-
-        "-c:v", "libx264",
-        "-profile:v", "baseline",
-        "-level", "3.1",
-        "-pix_fmt", "yuv420p",
-        "-preset", "veryfast",
-        "-crf", "20",
-
-        "-c:a", "aac",
-        "-b:a", "320k",
-        "-ac", "2",
-        "-ar", "44100",
-
-        "-movflags", "+faststart",
-        waMp4,
-      ];
-
-      await run(FFMPEG_BIN, ffArgs, process.cwd());
-
-      // Size check
-      const st = await fs.stat(waMp4);
-      const sizeMB = st.size / (1024 * 1024);
+      if (!(await fs.pathExists(waMp4))) {
+        await fs.remove(tempDir);
+        return reply("❌ FFmpeg failed to create output.");
+      }
 
       if (sizeMB > MAX_FILE_MB) {
         await fs.remove(tempDir);
         return reply(
-          `📦 Video too large (${sizeMB.toFixed(1)}MB).\nTry lower quality:\n.video 480 <name/url>`
+          `📦 Video still too big (${sizeMB.toFixed(1)}MB).\nTry lower quality:\n.video 480 <name/url>`
         );
       }
 
-      // ✅ Send playable video
+      // ✅ Send as NORMAL VIDEO (not document)
       await robin.sendMessage(
         from,
         {
           video: { url: waMp4 },
           mimetype: "video/mp4",
-          caption: `✅ Done (${quality}p)\n🎯 Client: ${clientUsed}`,
+          caption:
+            `✅ Done!\n` +
+            `🎥 Quality: ${quality}p\n` +
+            `⚙️ CRF: ${crfUsed}\n` +
+            `📦 Size: ${sizeMB.toFixed(1)}MB\n` +
+            `🎯 Client: ${clientUsed}`,
         },
         { quoted: mek }
       );
