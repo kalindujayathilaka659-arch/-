@@ -4,15 +4,41 @@ const path = require("path");
 const os = require("os");
 const axios = require("axios");
 const { spawn, execFile } = require("child_process");
-const ffmpegPath = require("ffmpeg-static"); // ✅ for audio bitrate fixing
+const ffmpegPath = require("ffmpeg-static");
 
 const COOKIE_FILE = path.join(__dirname, "../cookies/eporner.txt");
 
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
-// ✅ Force MP4 Audio bitrate
-const FORCE_AUDIO_BITRATE = "320k"; // ✅ AAC 320kbps
+const FORCE_AUDIO_BITRATE = "320k"; // AAC 320kbps
+
+// ✅ python bin (github runners = python3)
+const PYTHON_BIN =
+  process.env.PYTHON_BIN ||
+  (process.platform === "win32" ? "python" : "python3");
+
+// ✅ auto update yt-dlp nightly (only once)
+let YTDLP_UPDATED = false;
+async function ensureLatestYtDlp() {
+  if (YTDLP_UPDATED) return;
+  YTDLP_UPDATED = true;
+
+  // you can disable with: AUTO_UPDATE_YTDLP=0
+  if (String(process.env.AUTO_UPDATE_YTDLP || "1") === "0") return;
+
+  try {
+    // nightly via pip --pre (recommended for broken extractors)
+    await execBin(
+      PYTHON_BIN,
+      ["-m", "pip", "install", "-U", "--pre", "yt-dlp[default]"],
+      "pip yt-dlp update"
+    );
+  } catch (e) {
+    // ignore update errors (still try to run)
+    console.log("⚠ yt-dlp update skipped:", e?.message || e);
+  }
+}
 
 /* ================= HELPERS ================= */
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -39,7 +65,7 @@ function execBin(bin, args, label = "EXEC") {
     execFile(
       bin,
       args,
-      { maxBuffer: 1024 * 1024 * 50 },
+      { maxBuffer: 1024 * 1024 * 50, windowsHide: true },
       (err, stdout, stderr) => {
         if (err) {
           err._stdout = stdout || "";
@@ -56,13 +82,26 @@ function execBin(bin, args, label = "EXEC") {
   });
 }
 
-function runYtDlp(args, label = "yt-dlp") {
-  return execBin("yt-dlp", args, label);
+/* ✅ Run yt-dlp using python module (fixes old system yt-dlp in actions) */
+function runYtDlpPy(args, label = "yt-dlp(py)") {
+  return execBin(PYTHON_BIN, ["-m", "yt_dlp", ...args], label);
 }
 
-// ✅ improved reason detector (more real cases)
+/* ✅ Spawn yt-dlp python for progress */
+function spawnYtDlpPy(args) {
+  return spawn(PYTHON_BIN, ["-m", "yt_dlp", ...args], {
+    windowsHide: true,
+  });
+}
+
+// ✅ improved reason detector (adds extractor bugs)
 function detectReasonFromText(text = "") {
   const t = String(text).toLowerCase();
+
+  if (t.includes("keyerror") && t.includes("videomodel"))
+    return "yt-dlp extractor outdated (update yt-dlp)";
+  if (t.includes("extractor error"))
+    return "yt-dlp extractor error (update yt-dlp)";
 
   if (t.includes("cookie")) return "Cookies expired / invalid";
   if (t.includes("403") || t.includes("forbidden")) return "403 Forbidden (blocked)";
@@ -131,7 +170,7 @@ async function getMetadata(url) {
   for (const item of attempts) {
     for (let i = 0; i < 2; i++) {
       try {
-        const { stdout } = await runYtDlp(item.args, `${item.label} try#${i + 1}`);
+        const { stdout } = await runYtDlpPy(item.args, `${item.label} try#${i + 1}`);
         return JSON.parse(stdout);
       } catch (e) {
         lastErr = e;
@@ -173,6 +212,9 @@ cmd(
         return reply("❌ ffmpeg-static missing (needed for AAC 320kbps fix)");
       }
 
+      // ✅ important: update yt-dlp in github workspace
+      await ensureLatestYtDlp();
+
       // ================= QUALITY PARSER ================= //
       let quality = 720;
       let url = q.trim();
@@ -194,7 +236,6 @@ cmd(
         return reply("❌ *Cookie file missing*\nAdd: `/cookies/eporner.txt`");
       }
 
-      // ✅ unique temp dir
       tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "eporner-"));
       outputFile = path.join(tempDir, `ep_${Date.now()}.mp4`);
 
@@ -233,15 +274,10 @@ cmd(
         `🎧 Audio: *AAC ${FORCE_AUDIO_BITRATE}*\n\n` +
         `📥 *Starting download…*`;
 
-      // ================= SEND METADATA ================= //
       if (thumbnail) {
         try {
-          const tRes = await axios.get(thumbnail, { responseType: "arraybuffer" });
-          await bot.sendMessage(
-            from,
-            { image: Buffer.from(tRes.data), caption },
-            { quoted: msg }
-          );
+          const tRes = await axios.get(thumbnail, { responseType: "arraybuffer", timeout: 20000 });
+          await bot.sendMessage(from, { image: Buffer.from(tRes.data), caption }, { quoted: msg });
         } catch {
           await bot.sendMessage(from, { text: caption }, { quoted: msg });
         }
@@ -260,8 +296,9 @@ cmd(
       let lastUpdate = 0;
       let stderrLog = "";
 
-      const ytdlp = spawn("yt-dlp", [
+      const ytdlpArgs = [
         "--no-warnings",
+        "--newline",
         "--no-playlist",
         "--cookies",
         COOKIE_FILE,
@@ -276,9 +313,7 @@ cmd(
         "--socket-timeout",
         "20",
         "--concurrent-fragments",
-        "16",
-        "--http-chunk-size",
-        "20M",
+        "20",
         "-f",
         formatRule,
         "--merge-output-format",
@@ -286,142 +321,130 @@ cmd(
         "-o",
         outputFile,
         url,
-      ]);
+      ];
+
+      const ytdlp = spawnYtDlpPy(ytdlpArgs);
 
       ytdlp.stderr.on("data", async (data) => {
-        const text = data.toString();
-
+        const text = data.toString().replace(/\r/g, "");
         stderrLog += text;
         if (stderrLog.length > 20000) stderrLog = stderrLog.slice(-20000);
 
-        const match = text.match(/(\d{1,3}\.\d)%/);
+        const match = text.match(/(\d{1,3}\.\d+)%/);
         if (!match) return;
 
         const now = Date.now();
 
-        if (!progressMsg) {
-          progressMsg = await bot.sendMessage(
-            from,
-            { text: `📥 Downloading…\n⏳ Progress: *${match[1]}%*` },
-            { quoted: msg }
-          );
-          lastUpdate = now;
-          return;
-        }
-
-        if (now - lastUpdate > 2500) {
-          lastUpdate = now;
-          await bot.sendMessage(
-            from,
-            {
-              text: `📥 Downloading…\n⏳ Progress: *${match[1]}%*`,
-              edit: progressMsg.key,
-            },
-            { quoted: msg }
-          );
-        }
-      });
-
-      ytdlp.on("error", (err) => {
-        console.error("yt-dlp spawn error:", err);
-      });
-
-      // ================= DONE ================= //
-      ytdlp.on("close", async (code) => {
         try {
-          if (code !== 0 || !fs.existsSync(outputFile)) {
-            const reason = detectReasonFromText(stderrLog);
-            const snippet = tailLines(stderrLog, 10);
+          if (!progressMsg) {
+            progressMsg = await bot.sendMessage(
+              from,
+              { text: `📥 Downloading…\n⏳ Progress: *${match[1]}%*` },
+              { quoted: msg }
+            );
+            lastUpdate = now;
+            return;
+          }
 
-            if (tempDir && fs.existsSync(tempDir)) {
-              fs.rmSync(tempDir, { recursive: true, force: true });
-            }
-
-            return reply(
-              `❌ *Download failed*\n🧠 Reason: *${reason}*\n\n` +
-                `📌 Details:\n\`\`\`\n${snippet || "No output"}\n\`\`\``
+          if (now - lastUpdate > 2500) {
+            lastUpdate = now;
+            await bot.sendMessage(
+              from,
+              { text: `📥 Downloading…\n⏳ Progress: *${match[1]}%*`, edit: progressMsg.key },
+              { quoted: msg }
             );
           }
-
-          const sizeBytes = fs.statSync(outputFile).size;
-          if (sizeBytes < 300 * 1024) {
-            const reason = detectReasonFromText(stderrLog);
-            const snippet = tailLines(stderrLog, 10);
-
-            if (tempDir && fs.existsSync(tempDir)) {
-              fs.rmSync(tempDir, { recursive: true, force: true });
-            }
-
-            return reply(
-              `❌ *Download failed (empty file)*\n🧠 Reason: *${reason}*\n\n` +
-                `📌 Details:\n\`\`\`\n${snippet || "No output"}\n\`\`\``
-            );
-          }
-
-          /* =====================================================
-             ✅ AUDIO FIX: Convert to AAC 320k (keep video copy)
-          ===================================================== */
-          const fixedFile = path.join(tempDir, `fixed_${Date.now()}.mp4`);
-          let sendPath = outputFile;
-
-          try {
-            await execBin(
-              ffmpegPath,
-              [
-                "-y",
-                "-i",
-                outputFile,
-                "-c:v",
-                "copy",
-                "-c:a",
-                "aac",
-                "-b:a",
-                FORCE_AUDIO_BITRATE,
-                "-movflags",
-                "+faststart",
-                fixedFile,
-              ],
-              "FFmpeg AUDIO 320K"
-            );
-
-            if (fs.existsSync(fixedFile) && fs.statSync(fixedFile).size > 300 * 1024) {
-              sendPath = fixedFile;
-            }
-          } catch (e) {
-            console.log("⚠ FFmpeg audio fix failed, sending original...");
-          }
-
-          const sizeMB = (fs.statSync(sendPath).size / 1048576).toFixed(2);
-
-          await bot.sendMessage(
-            from,
-            {
-              document: fs.readFileSync(sendPath),
-              fileName: `${safeFileName(title)}_${quality}p.mp4`,
-              mimetype: "video/mp4",
-              caption:
-                `✅ *Download complete*\n` +
-                `🎥 Quality: *${quality}p*\n` +
-                `🎞 Video: *H.264*\n` +
-                `🎧 Audio: *AAC ${FORCE_AUDIO_BITRATE}*\n` +
-                `💾 Size: *${sizeMB} MB*`,
-            },
-            { quoted: msg }
-          );
-
-          if (tempDir && fs.existsSync(tempDir)) {
-            fs.rmSync(tempDir, { recursive: true, force: true });
-          }
-        } catch (e) {
-          console.error("Send Error:", e);
-          reply("❌ Failed to send video.");
-          try {
-            if (tempDir && fs.existsSync(tempDir)) {
-              fs.rmSync(tempDir, { recursive: true, force: true });
-            }
-          } catch {}
+        } catch {
+          // ignore edit errors
         }
       });
+
+      const exitCode = await new Promise((resolve) => {
+        ytdlp.on("close", (code) => resolve(code));
+        ytdlp.on("error", () => resolve(1));
+      });
+
+      if (exitCode !== 0 || !fs.existsSync(outputFile)) {
+        const reason = detectReasonFromText(stderrLog);
+        const snippet = tailLines(stderrLog, 10);
+
+        if (tempDir && fs.existsSync(tempDir)) {
+          fs.rmSync(tempDir, { recursive: true, force: true });
+        }
+
+        return reply(
+          `❌ *Download failed*\n🧠 Reason: *${reason}*\n\n` +
+            `📌 Details:\n\`\`\`\n${snippet || "No output"}\n\`\`\``
+        );
+      }
+
+      const sizeBytes = fs.statSync(outputFile).size;
+      if (sizeBytes < 300 * 1024) {
+        const reason = detectReasonFromText(stderrLog);
+        const snippet = tailLines(stderrLog, 10);
+
+        if (tempDir && fs.existsSync(tempDir)) {
+          fs.rmSync(tempDir, { recursive: true, force: true });
+        }
+
+        return reply(
+          `❌ *Download failed (empty file)*\n🧠 Reason: *${reason}*\n\n` +
+            `📌 Details:\n\`\`\`\n${snippet || "No output"}\n\`\`\``
+        );
+      }
+
+      /* ================= AUDIO FIX (AAC 320k) ================= */
+      const fixedFile = path.join(tempDir, `fixed_${Date.now()}.mp4`);
+      let sendPath = outputFile;
+
+      try {
+        await execBin(
+          ffmpegPath,
+          [
+            "-y",
+            "-i",
+            outputFile,
+            "-c:v",
+            "copy",
+            "-c:a",
+            "aac",
+            "-b:a",
+            FORCE_AUDIO_BITRATE,
+            "-movflags",
+            "+faststart",
+            fixedFile,
+          ],
+          "FFmpeg AUDIO 320K"
+        );
+
+        if (fs.existsSync(fixedFile) && fs.statSync(fixedFile).size > 300 * 1024) {
+          sendPath = fixedFile;
+        }
+      } catch {
+        console.log("⚠ FFmpeg audio fix failed, sending original...");
+      }
+
+      const sizeMB = (fs.statSync(sendPath).size / 1048576).toFixed(2);
+
+      await bot.sendMessage(
+        from,
+        {
+          document: fs.readFileSync(sendPath),
+          fileName: `${safeFileName(title)}_${quality}p.mp4`,
+          mimetype: "video/mp4",
+          caption:
+            `✅ *Download complete*\n` +
+            `🎥 Quality: *${quality}p*\n` +
+            `🎞 Video: *H.264*\n` +
+            `🎧 Audio: *AAC ${FORCE_AUDIO_BITRATE}*\n` +
+            `💾 Size: *${sizeMB} MB*`,
+        },
+        { quoted: msg }
+      );
+
+      if (tempDir && fs.existsSync(tempDir)) {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
     } catch (err) {
       console.error("EPORNER ERROR:", err);
 
