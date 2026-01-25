@@ -67,6 +67,8 @@ cmd(
     👻 ${config.PREFIX}mega <mrga.nz url>
     👻 ${config.PREFIX}download <direct download url>
     👻 ${config.PREFIX}torrent <torrent magnet url>
+    👻 ${config.PREFIX}largefile <torrent magnet url>
+    
     
 | _*SOCIAL MEDIA DOWNLOAD COMMANDS*_ |
     👻 ${config.PREFIX}song <song name>
