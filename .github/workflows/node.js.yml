@@ -32,5 +32,5 @@ jobs:
         run: npm install && npm update
 
       - name: Start application
-        run: npm test
+        run: npm start
         timeout-minutes: 330
