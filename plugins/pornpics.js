@@ -29,12 +29,12 @@ cmd(
 
       // ✅ Pornpics has TWO URL TYPES => try both
       const urlsToTry = [
-        `${base}/tags/${encodeURIComponent(tag)}/`, // ✅ tags url
-        `${base}/${encodeURIComponent(tag)}/`,      // ✅ normal url
-        `${base}/pornstars/${encodeURIComponent(tag)}/`,      // ✅ porn stars url
-        `${base}/channels/${encodeURIComponent(tag)}/`,      // ✅ porn channels url
+  `${base}/tags/${encodeURIComponent(tag)}/`,        // ✅ tags url
+  `${base}/${encodeURIComponent(tag)}/`,             // ✅ normal url
+  `${base}/pornstars/${encodeURIComponent(tag)}/`,   // ✅ porn stars url
+  `${base}/channels/${encodeURIComponent(tag)}/`,    // ✅ porn channels url
+  `${base}/?q=${encodeURIComponent(tag)}`,            // ✅ search query url
       ];
-
       // ✅ Cloudflare-safe headers
       const headers = {
         "User-Agent":
