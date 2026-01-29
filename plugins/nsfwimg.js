@@ -15,36 +15,102 @@ const BLOCK_TAGS = ["loli", "shota", "child", "young", "underage"];
 /* ================= HELPERS ================= */
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+function isHttpUrl(s) {
+  return /^https?:\/\//i.test(String(s || "").trim());
+}
+
+function normalizeBase(base) {
+  return String(base || "").replace(/\/+$/, "");
+}
+
+/**
+ * Supports:
+ *  - "big_ass"
+ *  - "big ass"  -> "big_ass" (single tag convenience)
+ *  - "big_ass, solo, 1girl" -> "big_ass solo 1girl" (multiple tags via comma)
+ * Also preserves negative tags like "-tag" (exclude).
+ */
 function normalizeTags(input) {
   if (!input) return DEFAULT_TAG;
 
-  const raw = input
+  const raw = String(input)
     .toLowerCase()
     .trim()
-    // allow (), :, _
-    .replace(/[^a-z0-9_\s\-():]/g, "")
+    // allow (), :, _, -, commas, spaces
+    .replace(/[^a-z0-9_\s\-():,]/g, "")
     .replace(/\s+/g, " ");
 
-  const parts = raw.split(" ").filter(Boolean);
+  // allow multi-tags by commas
+  const groups = raw
+    .split(",")
+    .map((g) => g.trim())
+    .filter(Boolean);
 
-  // ✅ dash → underscore
-  // ✅ space → underscore (IMPORTANT FIX)
-  const tags = parts
-    .map((t) => t.replace(/-/g, "_"))
-    .join("_")
+  if (!groups.length) return DEFAULT_TAG;
+
+  const fixed = groups
+    .map((g) => {
+      // keep negative tags working: "-tag"
+      const neg = g.startsWith("-");
+      const body = neg ? g.slice(1) : g;
+
+      // "space -> underscore" inside a tag group
+      const tag = body
+        .split(" ")
+        .filter(Boolean)
+        .map((t) => t.replace(/-/g, "_")) // dash inside tag name -> underscore
+        .join("_");
+
+      return neg ? `-${tag}` : tag;
+    })
+    // tags must be space-separated for rule34
+    .join(" ")
     .trim();
 
-  return tags || DEFAULT_TAG;
+  return fixed || DEFAULT_TAG;
 }
 
 function hasBlockedTags(tags) {
-  const t = ` ${tags.toLowerCase()} `;
-  return BLOCK_TAGS.some(
-    (bad) =>
-      t.includes(` ${bad} `) ||
-      t.includes(`_${bad}_`) ||
-      t.includes(`_${bad}`)
-  );
+  const tokens = String(tags || "")
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean);
+
+  return tokens.some((tok) => {
+    const neg = tok.startsWith("-");
+    const body = neg ? tok.slice(1) : tok;
+    if (!body) return false;
+
+    // split tag parts by underscore and check blocked words
+    const parts = body.split("_");
+    return parts.some((p) => BLOCK_TAGS.includes(p));
+  });
+}
+
+function extractTagsFromListUrl(url) {
+  try {
+    const u = new URL(url);
+    const t = u.searchParams.get("tags") || "";
+    // URLSearchParams gives decoded value; keep as-is
+    return t.trim();
+  } catch {
+    return "";
+  }
+}
+
+function normalizeListUrl(url) {
+  const u = new URL(url);
+  const out = new URL("/index.php", u.origin);
+  out.searchParams.set("page", "post");
+  out.searchParams.set("s", "list");
+
+  const tags = u.searchParams.get("tags") || "";
+  if (tags) out.searchParams.set("tags", tags);
+
+  const pid = u.searchParams.get("pid");
+  if (pid) out.searchParams.set("pid", pid);
+
+  return out.toString();
 }
 
 function parseQuery(q) {
@@ -67,7 +133,17 @@ function parseQuery(q) {
   }
 
   sendCount = Math.max(1, Math.min(sendCount, MAX_SEND));
-  return { tags: normalizeTags(query), sendCount };
+
+  // ✅ URL support:
+  // if user passes full URL, extract tags for API, and keep url for HTML fallback
+  if (isHttpUrl(query)) {
+    const listUrl = normalizeListUrl(query);
+    const tagsFromUrl = extractTagsFromListUrl(listUrl);
+    const tags = tagsFromUrl ? tagsFromUrl : DEFAULT_TAG;
+    return { tags, sendCount, listUrl };
+  }
+
+  return { tags: normalizeTags(query), sendCount, listUrl: null };
 }
 
 function shuffle(arr) {
@@ -122,10 +198,16 @@ async function fetchRule34ApiPosts(tags, pid = 0) {
 }
 
 /* ================= HTML FALLBACK ================= */
-async function fetchPostIdsFromList(tags) {
-  const url = `${BASE}/index.php?page=post&s=list&tags=${encodeURIComponent(
-    tags.replace(/_/g, "+")
-  )}`;
+async function fetchPostIdsFromList(tagsOrUrl) {
+  const input = String(tagsOrUrl ?? "").trim();
+  const cleanBase = normalizeBase(BASE);
+
+  const url = isHttpUrl(input)
+    ? normalizeListUrl(input)
+    : `${cleanBase}/index.php?page=post&s=list&tags=${encodeURIComponent(input).replace(
+        /%20/g,
+        "+"
+      )}`;
 
   const res = await axios.get(url, {
     headers: { ...headers, Accept: "text/html" },
@@ -139,8 +221,8 @@ async function fetchPostIdsFromList(tags) {
   const ids = new Set();
 
   $('a[href*="page=post"][href*="s=view"][href*="id="]').each((_, el) => {
-    const href = $(el).attr("href");
-    const m = href?.match(/id=(\d+)/);
+    const href = $(el).attr("href") || "";
+    const m = href.match(/(?:\?|&)id=(\d+)/);
     if (m) ids.add(m[1]);
   });
 
@@ -148,14 +230,11 @@ async function fetchPostIdsFromList(tags) {
 }
 
 async function fetchFullImageFromPostId(id) {
-  const res = await axios.get(
-    `${BASE}/index.php?page=post&s=view&id=${id}`,
-    {
-      headers: { ...headers, Accept: "text/html" },
-      timeout: 20000,
-      validateStatus: () => true,
-    }
-  );
+  const res = await axios.get(`${BASE}/index.php?page=post&s=view&id=${id}`, {
+    headers: { ...headers, Accept: "text/html" },
+    timeout: 20000,
+    validateStatus: () => true,
+  });
 
   if (res.status !== 200) return null;
 
@@ -183,7 +262,7 @@ cmd(
   },
   async (robin, mek, m, { q, from, reply }) => {
     try {
-      const { tags, sendCount } = parseQuery(q);
+      const { tags, sendCount, listUrl } = parseQuery(q);
 
       if (hasBlockedTags(tags)) {
         return reply("❌ Blocked tag detected (safety).");
@@ -209,7 +288,7 @@ cmd(
 
       /* HTML fallback */
       if (!images.length) {
-        const ids = await fetchPostIdsFromList(tags);
+        const ids = await fetchPostIdsFromList(listUrl || tags);
         for (const id of shuffle(ids).slice(0, 30)) {
           const img = await fetchFullImageFromPostId(id);
           if (img) images.push(img);
