@@ -1,41 +1,28 @@
 const { cmd } = require("../command");
 const ytsr = require("yt-search");
+const ytdlp = require("yt-dlp-exec");
+
+// ✅ ffmpeg + ffprobe installers (FIX: Cannot find ffprobe)
+const ffmpeg = require("fluent-ffmpeg");
+const ffmpegInstaller = require("@ffmpeg-installer/ffmpeg");
+const ffprobeInstaller = require("@ffprobe-installer/ffprobe");
+ffmpeg.setFfmpegPath(ffmpegInstaller.path);
+ffmpeg.setFfprobePath(ffprobeInstaller.path);
+
 const fs = require("fs-extra");
 const path = require("path");
-const { execFile } = require("child_process");
 
-/* ================= CONFIG ================= */
-const PYTHON_BIN = process.env.PYTHON_BIN || "python"; // use python3 if needed
+/* ================= SETTINGS ================= */
+const MAX_VIDEO_BYTES = 90 * 1024 * 1024; // WhatsApp "video" safe
+const DOWNLOAD_CAP_HEIGHT = 1080;         // try best up to 1080p for WhatsApp
+const AUDIO_KBPS = 160;                   // AAC audio bitrate for encode
+const X264_PRESET = "slow";               // better quality per bitrate
+const SAFETY = 0.94;                      // keep a bit under limit (mux overhead)
 
-const MAX_DURATION_SECONDS = 1800; // 30 min
-const MAX_FILE_MB = 95;
-
-const DEFAULT_QUALITY = 720;
-const ALLOWED_QUALITIES = new Set([144, 240, 360, 480, 720, 1080]);
-
-const UA =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
-
-/* ================= FFMPEG PATH (npm) ================= */
-let FFMPEG_BIN = process.env.FFMPEG_BIN;
-
-if (!FFMPEG_BIN) {
-  try {
-    FFMPEG_BIN = require("ffmpeg-static");
-  } catch {}
-}
-if (!FFMPEG_BIN) {
-  try {
-    FFMPEG_BIN = require("@ffmpeg-installer/ffmpeg").path;
-  } catch {}
-}
-if (!FFMPEG_BIN) FFMPEG_BIN = "ffmpeg";
-
-/* ================= COOKIES AUTO FIND ================= */
+/* ================= COOKIES (AUTO FIND) ================= */
 const COOKIE_CANDIDATES = [
-  path.join(process.cwd(), "cookies/youtube_cookies.txt"),
   path.join(__dirname, "../cookies/youtube_cookies.txt"),
-  "/workspaces/-/cookies/youtube_cookies.txt",
+  path.join(process.cwd(), "cookies/youtube_cookies.txt"),
 ];
 
 function findCookiesFile() {
@@ -43,248 +30,277 @@ function findCookiesFile() {
 }
 
 /* ================= HELPERS ================= */
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const s = (v) => (v == null ? "" : String(v));
-
-function waSafe(text, maxLen = 900) {
-  let t = s(text);
-  try {
-    t = t.normalize("NFKC");
-  } catch {}
-  t = t.replace(/[\u0000-\u001F\u007F]/g, "");
-  t = t.replace(/\*/g, "✱").replace(/_/g, "ˍ").replace(/~/g, "˷").replace(/`/g, "ˋ");
-  t = t.replace(/\s+/g, " ").trim();
-  if (t.length > maxLen) t = t.slice(0, maxLen - 1) + "…";
-  return t;
-}
-
-function tailLines(text = "", n = 16) {
+function tailLines(text = "", n = 15) {
   return String(text).split("\n").filter(Boolean).slice(-n).join("\n");
 }
 
-function run(bin, args, cwd = process.cwd()) {
-  return new Promise((resolve, reject) => {
-    execFile(
-      bin,
-      args,
-      { cwd, windowsHide: true, maxBuffer: 1024 * 1024 * 80 }, // 80MB buffer
-      (err, stdout, stderr) => {
-        if (err) {
-          err.stdout = stdout || "";
-          err.stderr = stderr || "";
-          return reject(err);
-        }
-        resolve({ stdout: stdout || "", stderr: stderr || "" });
-      }
-    );
-  });
+function getYtDlpText(err) {
+  return (
+    (err?.stderr || "") +
+    "\n" +
+    (err?.stdout || "") +
+    "\n" +
+    (err?.message || "")
+  );
 }
 
-async function ffmpegOk() {
-  try {
-    if (FFMPEG_BIN && FFMPEG_BIN !== "ffmpeg") {
-      const exists = await fs.pathExists(FFMPEG_BIN);
-      if (!exists) return false;
-    }
-    await run(FFMPEG_BIN, ["-version"]);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function isYoutubeUrl(str) {
-  return /(?:youtube\.com|youtu\.be)/i.test(s(str));
-}
-
-function getArgsText(m, q) {
-  if (q) return s(q);
-
-  const body =
-    s(m?.body) ||
-    s(m?.text) ||
-    s(m?.message?.conversation) ||
-    s(m?.message?.extendedTextMessage?.text) ||
-    "";
-
-  return body.replace(/^[.!/#]?\s*video\b/i, "").trim();
-}
-
-function parseQualityFirst(argsText) {
-  const text = s(argsText).trim();
-  if (!text) return { quality: DEFAULT_QUALITY, query: "" };
-
-  const parts = text.split(/\s+/).filter(Boolean);
-  const first = s(parts[0]).toLowerCase();
-  const m = first.match(/^(\d{3,4})p?$/);
-
-  if (m) {
-    const qNum = Number(m[1]);
-    if (ALLOWED_QUALITIES.has(qNum)) {
-      parts.shift();
-      return { quality: qNum, query: parts.join(" ").trim() };
-    }
-  }
-
-  return { quality: DEFAULT_QUALITY, query: text };
-}
-
-function parseDurationToSeconds(timestamp) {
-  if (!timestamp) return 0;
-  const parts = String(timestamp).split(":").map(Number);
-  if (parts.some((n) => Number.isNaN(n))) return 0;
-  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
-  if (parts.length === 2) return parts[0] * 60 + parts[1];
-  return parts[0] || 0;
-}
-
-function formatViews(v) {
-  const n = Number(v);
-  if (!Number.isFinite(n)) return waSafe(v || "Unknown");
-  try {
-    return new Intl.NumberFormat("en", { notation: "compact" }).format(n);
-  } catch {
-    return String(n);
-  }
-}
-
-async function findDownloadedFile(dir) {
-  const files = await fs.readdir(dir);
-  const candidates = [];
-
-  for (const f of files) {
-    if (f.endsWith(".part")) continue;
-    const full = path.join(dir, f);
-    const st = await fs.stat(full);
-    if (st.isFile()) candidates.push({ full, size: st.size });
-  }
-
-  candidates.sort((a, b) => b.size - a.size);
-  return candidates[0]?.full || null;
-}
-
-/* ================= ERROR REASON ================= */
-function detectReasonFromText(text = "") {
+function detectReason(text = "") {
   const t = String(text).toLowerCase();
 
   if (t.includes("sign in to confirm") || t.includes("not a bot"))
-    return "YouTube bot-check (cookies expired / not accepted)";
-  if (t.includes("signature solving failed") || t.includes("challenge solving failed"))
-    return "Signature solver failed (EJS / JS runtime issue)";
+    return "YouTube bot-check (cookies not working / not loaded)";
   if (t.includes("private video") || t.includes("login required"))
-    return "Login required / Private video";
+    return "Private / Login required";
+  if (t.includes("signature solving failed") || t.includes("challenge solving failed"))
+    return "EJS solver missing (install Node20/Deno + remote-components)";
   if (t.includes("429") || t.includes("too many requests"))
-    return "429 Rate limited";
+    return "Rate limited (429)";
   if (t.includes("403") || t.includes("forbidden"))
     return "403 Forbidden (blocked)";
-  if (t.includes("video unavailable") || t.includes("not available"))
+  if (t.includes("unavailable") || t.includes("not available"))
     return "Video unavailable / removed";
+  if (t.includes("requested format is not available"))
+    return "Requested quality/codec not available";
   if (t.includes("downloaded file is empty"))
-    return "Downloaded file empty (blocked / cookie issue)";
-  if (t.includes("ffmpeg"))
-    return "FFmpeg conversion error";
+    return "Downloaded file is empty (blocked / cookies issue)";
 
   return "Unknown";
 }
 
-/* ================= yt-dlp DOWNLOAD (BEST QUALITY) ================= */
-async function ytdlpDownload(videoUrl, outTpl, quality, cookiesPath) {
-  const clients = ["android", "web", "tv"];
-  const formatRule =
-    `bv*[height<=${quality}]+ba/best[height<=${quality}]/best`; // ✅ best possible (vp9 ok)
-
-  let lastErr = null;
-
-  for (const client of clients) {
-    try {
-      const args = [
-        videoUrl,
-        "--no-playlist",
-        "--no-warnings",
-        "--quiet",
-
-        "--retries", "5",
-        "--fragment-retries", "5",
-        "--socket-timeout", "20",
-
-        "--user-agent", UA,
-        "--referer", "https://www.youtube.com/",
-
-        "--remote-components", "ejs:github",
-        "--js-runtimes", "node",
-
-        "--extractor-args", `youtube:player_client=${client}`,
-
-        "--match-filter", `duration <= ${MAX_DURATION_SECONDS}`,
-        "--max-filesize", `${MAX_FILE_MB}M`,
-
-        "-o", outTpl,
-        "-f", formatRule,
-      ];
-
-      if (cookiesPath && (await fs.pathExists(cookiesPath))) {
-        args.push("--cookies", cookiesPath);
-      }
-
-      await run(PYTHON_BIN, ["-m", "yt_dlp", ...args], process.cwd());
-      return client;
-    } catch (e) {
-      lastErr = e;
-      continue;
-    }
+function humanBytes(bytes = 0) {
+  const units = ["B", "KB", "MB", "GB"];
+  let b = Number(bytes) || 0;
+  let i = 0;
+  while (b >= 1024 && i < units.length - 1) {
+    b /= 1024;
+    i++;
   }
-
-  throw lastErr || new Error("yt-dlp failed");
+  return `${b.toFixed(i === 0 ? 0 : 2)} ${units[i]}`;
 }
 
-/* ================= COMPRESS TO FIT (KEEP QUALITY) ================= */
-async function compressToFit(inputFile, outFile, quality, maxMb) {
-  const CRF_TRIES = [18, 19, 20, 21, 22, 24, 26, 28];
-  const AUDIO_K = 160; // ✅ better than 128 but still small
+function isUrl(str = "") {
+  return /^https?:\/\//i.test(String(str).trim());
+}
 
-  // ✅ FIXED FILTER (escape comma)
-  const vf = `scale=-2:min(${quality}\\,ih)`;
+function extractVideoId(input = "") {
+  const s = String(input);
+  let m = s.match(/youtu\.be\/([a-zA-Z0-9_-]{6,})/);
+  if (m) return m[1];
+  m = s.match(/[?&]v=([a-zA-Z0-9_-]{6,})/);
+  if (m) return m[1];
+  m = s.match(/youtube\.com\/shorts\/([a-zA-Z0-9_-]{6,})/);
+  if (m) return m[1];
+  return null;
+}
 
-  for (const crf of CRF_TRIES) {
-    const args = [
-      "-y",
-      "-i", inputFile,
+async function findDownloadedVideoFile(tempDir) {
+  const files = await fs.readdir(tempDir).catch(() => []);
+  const video = files.find(
+    (f) =>
+      /^video\./i.test(f) &&
+      (f.endsWith(".mp4") || f.endsWith(".mkv") || f.endsWith(".webm"))
+  );
+  return video ? path.join(tempDir, video) : null;
+}
 
-      "-map", "0:v:0",
-      "-map", "0:a:0?",
+async function ffprobeAsync(filePath) {
+  return await new Promise((resolve, reject) => {
+    ffmpeg.ffprobe(filePath, (err, data) => (err ? reject(err) : resolve(data)));
+  });
+}
 
-      "-vf", vf,
-      "-r", "30",
+/* ================= DOWNLOAD ================= */
+async function downloadVideo({ url, cookiesPath, tempDir, maxHeight = DOWNLOAD_CAP_HEIGHT }) {
+  const outTpl = path.join(tempDir, "video.%(ext)s");
+  const cap = maxHeight && Number(maxHeight) > 0 ? `[height<=${maxHeight}]` : "";
 
-      "-c:v", "libx264",
-      "-preset", "slow",
-      "-crf", String(crf),
-      "-profile:v", "main",
-      "-pix_fmt", "yuv420p",
+  const fmt =
+    `bv*[ext=mp4][vcodec^=avc1]${cap}+ba[ext=m4a]/` +
+    `b[ext=mp4][vcodec^=avc1]${cap}/` +
+    `bv*${cap}+ba/b${cap}/best${cap}`;
 
-      "-c:a", "aac",
-      "-b:a", `${AUDIO_K}k`,
-      "-ac", "2",
-      "-ar", "44100",
+  await ytdlp(url, {
+    output: outTpl,
+    format: fmt,
+    cookies: cookiesPath,
 
-      "-movflags", "+faststart",
-      outFile,
-    ];
+    remoteComponents: "ejs:github",
+    jsRuntimes: "node",
 
-    await run(FFMPEG_BIN, args, process.cwd());
+    mergeOutputFormat: "mp4",
+    remuxVideo: "mp4",
 
-    const st = await fs.stat(outFile);
-    const sizeMB = st.size / (1024 * 1024);
+    noWarnings: true,
+    noPlaylist: true,
+    quiet: true,
+  });
 
-    if (sizeMB <= maxMb) {
-      return { crfUsed: crf, sizeMB };
-    }
+  return await findDownloadedVideoFile(tempDir);
+}
 
-    await sleep(200);
+/* ================= QUALITY/RESOLUTION DECIDER ================= */
+function pickBestHeight(sourceHeight, videoKbps) {
+  const h = Number(sourceHeight) || 720;
+  if (videoKbps >= 2500) return Math.min(h, 1080);
+  if (videoKbps >= 1400) return Math.min(h, 720);
+  if (videoKbps >= 900) return Math.min(h, 480);
+  return Math.min(h, 360);
+}
+
+/* ================= 0-LOSS COPY REMUX ================= */
+async function tryCopyFaststart(inputPath, outputPath) {
+  const meta = await ffprobeAsync(inputPath);
+  const v = (meta.streams || []).find((s) => s.codec_type === "video");
+  const a = (meta.streams || []).find((s) => s.codec_type === "audio");
+
+  const vCodec = (v?.codec_name || "").toLowerCase();
+  const aCodec = (a?.codec_name || "").toLowerCase();
+  const pixFmt = (v?.pix_fmt || "").toLowerCase();
+
+  const isH264 = vCodec === "h264";
+  const isAAC = !a ? true : aCodec === "aac";
+  const isYuv420 = !pixFmt || pixFmt.includes("yuv420");
+
+  if (!isH264 || !isAAC || !isYuv420) return { ok: false };
+
+  await new Promise((resolve, reject) => {
+    ffmpeg(inputPath)
+      .outputOptions([
+        "-map 0:v:0",
+        "-map 0:a:0?",
+        "-c copy",
+        "-movflags +faststart",
+        "-sn",
+        "-dn",
+      ])
+      .on("end", resolve)
+      .on("error", reject)
+      .save(outputPath);
+  });
+
+  return { ok: true, mode: "copy" };
+}
+
+/* ================= 2-PASS TARGET SIZE ENCODE ================= */
+async function encodeToTargetSize({ inputPath, outputPath, tempDir, targetBytes }) {
+  const meta = await ffprobeAsync(inputPath);
+  const v = (meta.streams || []).find((s) => s.codec_type === "video");
+
+  const duration = Number(meta.format?.duration) || Number(v?.duration) || 0;
+
+  if (!duration || duration < 1) {
+    await new Promise((resolve, reject) => {
+      ffmpeg(inputPath)
+        .videoCodec("libx264")
+        .audioCodec("aac")
+        .audioBitrate(`${AUDIO_KBPS}k`)
+        .outputOptions([
+          "-preset " + X264_PRESET,
+          "-crf 20",
+          "-pix_fmt yuv420p",
+          "-movflags +faststart",
+          "-vf scale=trunc(iw/2)*2:trunc(ih/2)*2",
+          "-profile:v high",
+          "-level 4.1",
+          "-ac 2",
+          "-ar 44100",
+          "-sn",
+          "-dn",
+        ])
+        .on("end", resolve)
+        .on("error", reject)
+        .save(outputPath);
+    });
+    return { mode: "reencode_1pass" };
   }
 
-  const st = await fs.stat(outFile);
-  return { crfUsed: CRF_TRIES[CRF_TRIES.length - 1], sizeMB: st.size / (1024 * 1024) };
+  const totalKbps = Math.floor(((targetBytes * 8) / duration) / 1000 * SAFETY);
+  const videoKbps = Math.max(300, totalKbps - AUDIO_KBPS);
+
+  const srcH = Number(v?.height) || 720;
+  const bestH = pickBestHeight(srcH, videoKbps);
+
+  const passlog = path.join(tempDir, "x264_passlog");
+  const pass1Path = path.join(tempDir, "pass1.mp4");
+
+  await new Promise((resolve, reject) => {
+    ffmpeg(inputPath)
+      .videoCodec("libx264")
+      .outputOptions([
+        "-preset " + X264_PRESET,
+        "-b:v " + videoKbps + "k",
+        "-maxrate " + Math.floor(videoKbps * 1.1) + "k",
+        "-bufsize " + Math.floor(videoKbps * 2) + "k",
+        "-pix_fmt yuv420p",
+        "-vf scale=-2:" + bestH,
+        "-profile:v high",
+        "-level 4.1",
+        "-pass 1",
+        "-passlogfile " + passlog,
+        "-an",
+        "-f mp4",
+        "-movflags +faststart",
+        "-sn",
+        "-dn",
+      ])
+      .on("end", resolve)
+      .on("error", reject)
+      .save(pass1Path);
+  });
+
+  await new Promise((resolve, reject) => {
+    ffmpeg(inputPath)
+      .videoCodec("libx264")
+      .audioCodec("aac")
+      .audioBitrate(`${AUDIO_KBPS}k`)
+      .outputOptions([
+        "-preset " + X264_PRESET,
+        "-b:v " + videoKbps + "k",
+        "-maxrate " + Math.floor(videoKbps * 1.1) + "k",
+        "-bufsize " + Math.floor(videoKbps * 2) + "k",
+        "-pix_fmt yuv420p",
+        "-vf scale=-2:" + bestH,
+        "-profile:v high",
+        "-level 4.1",
+        "-pass 2",
+        "-passlogfile " + passlog,
+        "-movflags +faststart",
+        "-ac 2",
+        "-ar 44100",
+        "-sn",
+        "-dn",
+      ])
+      .on("end", resolve)
+      .on("error", reject)
+      .save(outputPath);
+  });
+
+  await fs.remove(pass1Path).catch(() => {});
+  await fs.remove(passlog + "-0.log").catch(() => {});
+  await fs.remove(passlog + "-0.log.mbtree").catch(() => {});
+
+  return { mode: "reencode_2pass", height: bestH, videoKbps };
+}
+
+/* ================= FINALIZE SMART ================= */
+async function makeWhatsAppBest({ inputPath, tempDir, targetBytes }) {
+  const copyPath = path.join(tempDir, "final_copy.mp4");
+  const copyTry = await tryCopyFaststart(inputPath, copyPath);
+
+  if (copyTry.ok) {
+    const s = (await fs.stat(copyPath)).size;
+    if (s <= targetBytes) return { path: copyPath, mode: "copy" };
+  }
+
+  const encodePath = path.join(tempDir, "final_encode.mp4");
+  const enc = await encodeToTargetSize({
+    inputPath,
+    outputPath: encodePath,
+    tempDir,
+    targetBytes,
+  });
+
+  return { path: encodePath, mode: enc.mode };
 }
 
 /* ================= COMMAND ================= */
@@ -293,132 +309,124 @@ cmd(
     pattern: "video",
     ownerOnly: true,
     react: "🎬",
-    desc: "WhatsApp playable video | .video 480 <name/url> (default 720)",
+    desc: "Download best WhatsApp-playable quality (video only)",
     category: "download",
     filename: __filename,
   },
   async (robin, mek, m, { from, q, reply }) => {
     const id = Date.now();
-    const tempDir = `./temp/${id}`;
+    const tempDir = path.join("./temp", String(id));
 
     try {
-      const argsText = getArgsText(m, q);
-      const { quality, query } = parseQualityFirst(argsText);
+      if (!q) return reply("*Please provide a video name or YouTube URL.*");
 
-      if (!query) {
+      const COOKIES_PATH = findCookiesFile();
+      if (!COOKIES_PATH) {
         return reply(
-          "*Usage:*\n.video 480 <name/url>\n\n*Examples:*\n.video 480 despacito\n.video 720 https://youtube.com/watch?v=xxxxx"
+          "❌ YouTube cookies file not found!\n\n✅ Put your cookies file in:\n• /cookies/youtube_cookies.txt"
         );
       }
 
-      if (!(await ffmpegOk())) {
-        return reply(
-          "❌ FFmpeg not found.\nInstall:\n`npm i ffmpeg-static`\n(or `npm i @ffmpeg-installer/ffmpeg`)"
-        );
+      // 🔍 Get video info (URL or search)
+      let data = null;
+
+      if (isUrl(q)) {
+        const vid = extractVideoId(q);
+        if (vid) data = (await ytsr({ videoId: vid }).catch(() => null)) || null;
+
+        if (!data) {
+          data = {
+            title: "YouTube Video",
+            url: q.trim(),
+            thumbnail: "https://i.imgur.com/8fK4h6G.jpeg",
+            timestamp: "Unknown",
+            ago: "Unknown",
+            views: "Unknown",
+          };
+        }
+      } else {
+        const search = await ytsr(q);
+        data = search.videos?.[0];
+        if (!data) return reply("❌ Video not found.");
       }
 
       await fs.ensureDir(tempDir);
 
-      const COOKIES_PATH = findCookiesFile();
-      if (!COOKIES_PATH) {
-        await fs.remove(tempDir);
-        return reply(
-          "❌ YouTube cookies not found!\n\nPut cookies in:\n• /cookies/youtube_cookies.txt"
-        );
-      }
+      const caption =
+        `*🎬 GHOST VIDEO DOWNLOADER 👻*\n\n` +
+        `👻 *Title:* ${data.title}\n` +
+        `👻 *Duration:* ${data.timestamp || "Unknown"}\n` +
+        `👻 *Uploaded:* ${data.ago || "Unknown"}\n` +
+        `👻 *Views:* ${data.views || "Unknown"}\n` +
+        `👻 *URL:* ${data.url}\n\n` +
+        `🍪 Cookies: ✅ Loaded\n\n` +
+        `📥 *Downloading video…*`;
 
-      const search = await ytsr(query);
-      const info = search?.videos?.[0] || null;
+      await robin.sendMessage(from, { image: { url: data.thumbnail }, caption }, { quoted: mek });
 
-      if (!isYoutubeUrl(query) && !info?.videoId) {
-        await fs.remove(tempDir);
-        return reply("❌ Video not found.");
-      }
-
-      const videoUrl = isYoutubeUrl(query)
-        ? s(query).trim()
-        : `https://www.youtube.com/watch?v=${s(info.videoId)}`;
-
-      const totalSeconds = parseDurationToSeconds(info?.timestamp);
-      if (totalSeconds && totalSeconds > MAX_DURATION_SECONDS) {
-        await fs.remove(tempDir);
-        return reply("⏱️ Video limit is 30 minutes.");
-      }
-
-      if (info?.thumbnail) {
-        const caption =
-          `🎥 *${waSafe(info?.title || "YouTube Video")}*\n` +
-          `📺 *Channel:* ${waSafe(info?.author?.name || info?.author || "Unknown")}\n` +
-          `🕒 *Duration:* ${waSafe(info?.timestamp || "Unknown")}\n` +
-          `👁 *Views:* ${formatViews(info?.views)}\n` +
-          `📦 *Quality:* ${quality}p\n` +
-          `🍪 Cookies: ✅ Loaded\n\n` +
-          `⏳ Downloading best quality…`;
-
-        await robin.sendMessage(from, { image: { url: info.thumbnail }, caption }, { quoted: mek });
-      }
-
-      // ✅ Download best quality first
-      const outTpl = path.join(tempDir, "input.%(ext)s");
-
-      let clientUsed = "unknown";
+      // ✅ Download
+      let rawPath = null;
       try {
-        clientUsed = await ytdlpDownload(videoUrl, outTpl, quality, COOKIES_PATH);
+        rawPath = await downloadVideo({
+          url: data.url,
+          cookiesPath: COOKIES_PATH,
+          tempDir,
+          maxHeight: DOWNLOAD_CAP_HEIGHT,
+        });
       } catch (e) {
-        const out = (e?.stderr || "") + "\n" + (e?.stdout || "") + "\n" + (e?.message || "");
-        const reason = detectReasonFromText(out);
-        await fs.remove(tempDir);
+        const out = getYtDlpText(e);
+        const reason = detectReason(out);
+        await fs.remove(tempDir).catch(() => {});
         return reply(
-          `❌ Download failed.\n🧠 Reason: *${reason}*\n` +
-            `📌 yt-dlp output:\n\`\`\`\n${tailLines(out, 18)}\n\`\`\``
+          `❌ Download failed.\n🧠 Reason: *${reason}*\n\n📌 yt-dlp output:\n\`\`\`\n${tailLines(out, 18)}\n\`\`\``
         );
       }
 
-      const inputFile = await findDownloadedFile(tempDir);
-      if (!inputFile) {
-        await fs.remove(tempDir);
-        return reply("❌ Download failed (no file created).");
+      if (!rawPath || !fs.existsSync(rawPath) || (await fs.stat(rawPath)).size < 200 * 1024) {
+        await fs.remove(tempDir).catch(() => {});
+        return reply("❌ Downloaded file is empty / missing.\n✅ Export cookies again.");
       }
 
-      // ✅ Compress to WhatsApp MP4 (keep quality, fit size)
-      const waMp4 = path.join(tempDir, "wa.mp4");
+      // ✅ Finalize best possible under WhatsApp video limit
+      const final = await makeWhatsAppBest({
+        inputPath: rawPath,
+        tempDir,
+        targetBytes: MAX_VIDEO_BYTES,
+      });
 
-      const { crfUsed, sizeMB } = await compressToFit(inputFile, waMp4, quality, MAX_FILE_MB);
+      const sendPath = final.path;
+      const size = (await fs.stat(sendPath)).size;
 
-      if (!(await fs.pathExists(waMp4))) {
-        await fs.remove(tempDir);
-        return reply("❌ FFmpeg failed to create output.");
-      }
-
-      if (sizeMB > MAX_FILE_MB) {
-        await fs.remove(tempDir);
+      if (size > MAX_VIDEO_BYTES) {
+        await fs.remove(tempDir).catch(() => {});
         return reply(
-          `📦 Video still too big (${sizeMB.toFixed(1)}MB).\nTry lower quality:\n.video 480 <name/url>`
+          `⚠️ Video is still too big to send as WhatsApp *video*: ${humanBytes(size)}\n` +
+          `Try a shorter video or reduce MAX_VIDEO_BYTES.`
         );
       }
 
-      // ✅ Send as NORMAL VIDEO (not document)
+      const modeLine =
+        final.mode === "copy"
+          ? "✅ Mode: 0-loss (copy/remux)"
+          : "✅ Mode: re-encoded (max quality under WhatsApp limit)";
+
+      // ✅ Send ONLY as VIDEO
       await robin.sendMessage(
         from,
         {
-          video: { url: waMp4 },
+          video: { url: sendPath },
           mimetype: "video/mp4",
-          caption:
-            `✅ Done!\n` +
-            `🎥 Quality: ${quality}p\n` +
-            `⚙️ CRF: ${crfUsed}\n` +
-            `📦 Size: ${sizeMB.toFixed(1)}MB\n` +
-            `🎯 Client: ${clientUsed}`,
+          caption: `👻 *${data.title}*\n📦 Size: ${humanBytes(size)}\n${modeLine}`,
         },
         { quoted: mek }
       );
 
-      await fs.remove(tempDir);
-      return;
-    } catch (e) {
-      console.error("❌ Error:", e?.stderr || e);
       await fs.remove(tempDir).catch(() => {});
-      return reply(`❌ Error: ${e.message}`);
+      reply("*✅ Sent best quality possible as WhatsApp video!* 👻");
+    } catch (err) {
+      console.error("❌ Video Error:", err);
+      reply("❌ Error: " + (err.message || "unknown"));
+      await fs.remove(tempDir).catch(() => {});
     }
   }
 );
