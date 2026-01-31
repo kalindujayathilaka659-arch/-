@@ -2,43 +2,39 @@ const { cmd } = require("../command");
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
-const axios = require("axios");
 const { spawn, execFile } = require("child_process");
 const ffmpegPath = require("ffmpeg-static");
 
+/* ================= CONFIG ================= */
 const COOKIE_FILE = path.join(__dirname, "../cookies/eporner.txt");
 
 const UA =
+  process.env.EP_UA ||
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
 const FORCE_AUDIO_BITRATE = "320k"; // AAC 320kbps
 
-// ✅ python bin (github runners = python3)
+// Quality selector
+const ALLOWED_QUALITIES = [360, 480, 720, 1080];
+const DEFAULT_QUALITY = 720;
+const MAX_CAP_QUALITY = 1080;
+
+// GitHub runners => python3
 const PYTHON_BIN =
-  process.env.PYTHON_BIN ||
-  (process.platform === "win32" ? "python" : "python3");
+  process.env.PYTHON_BIN || (process.platform === "win32" ? "python" : "python3");
 
-// ✅ auto update yt-dlp nightly (only once)
+// SPEED TUNING (env overridable)
+const USE_ARIA2C = String(process.env.EP_USE_ARIA2C || "1") !== "0"; // default ON
+const ARIA_CONN = String(process.env.EP_ARIA_CONN || "16"); // 8-16 recommended
+const CONCURRENT_FRAGMENTS = String(process.env.EP_FRAGMENTS || "32"); // 20-32 good
+const HTTP_CHUNK = String(process.env.EP_HTTP_CHUNK || "20M"); // helps some servers
+
+// Optional speed toggles
+const SEND_THUMB = String(process.env.EP_THUMB || "1") !== "0"; // set 0 to skip thumb
+const DO_AUDIO_FIX = String(process.env.EP_AUDIO_FIX || "1") !== "0"; // set 0 to skip AAC fix
+
+// Auto update yt-dlp (can disable with AUTO_UPDATE_YTDLP=0)
 let YTDLP_UPDATED = false;
-async function ensureLatestYtDlp() {
-  if (YTDLP_UPDATED) return;
-  YTDLP_UPDATED = true;
-
-  // you can disable with: AUTO_UPDATE_YTDLP=0
-  if (String(process.env.AUTO_UPDATE_YTDLP || "1") === "0") return;
-
-  try {
-    // nightly via pip --pre (recommended for broken extractors)
-    await execBin(
-      PYTHON_BIN,
-      ["-m", "pip", "install", "-U", "--pre", "yt-dlp[default]"],
-      "pip yt-dlp update"
-    );
-  } catch (e) {
-    // ignore update errors (still try to run)
-    console.log("⚠ yt-dlp update skipped:", e?.message || e);
-  }
-}
 
 /* ================= HELPERS ================= */
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -52,7 +48,8 @@ function safeFileName(name, max = 80) {
 }
 
 function isValidEpornerUrl(url) {
-  return typeof url === "string" && url.includes("eporner.com");
+  const s = String(url || "");
+  return s.includes("eporner.com");
 }
 
 function tailLines(text = "", maxLines = 10) {
@@ -82,26 +79,22 @@ function execBin(bin, args, label = "EXEC") {
   });
 }
 
-/* ✅ Run yt-dlp using python module (fixes old system yt-dlp in actions) */
+// Run yt-dlp using python module (Actions safe)
 function runYtDlpPy(args, label = "yt-dlp(py)") {
   return execBin(PYTHON_BIN, ["-m", "yt_dlp", ...args], label);
 }
 
-/* ✅ Spawn yt-dlp python for progress */
+// Spawn yt-dlp python (silent, no WhatsApp progress)
 function spawnYtDlpPy(args) {
-  return spawn(PYTHON_BIN, ["-m", "yt_dlp", ...args], {
-    windowsHide: true,
-  });
+  return spawn(PYTHON_BIN, ["-m", "yt_dlp", ...args], { windowsHide: true });
 }
 
-// ✅ improved reason detector (adds extractor bugs)
+// Reason detector
 function detectReasonFromText(text = "") {
   const t = String(text).toLowerCase();
 
-  if (t.includes("keyerror") && t.includes("videomodel"))
+  if (t.includes("keyerror") || t.includes("extractor error"))
     return "yt-dlp extractor outdated (update yt-dlp)";
-  if (t.includes("extractor error"))
-    return "yt-dlp extractor error (update yt-dlp)";
 
   if (t.includes("cookie")) return "Cookies expired / invalid";
   if (t.includes("403") || t.includes("forbidden")) return "403 Forbidden (blocked)";
@@ -127,18 +120,52 @@ function detectReasonFromText(text = "") {
 
   if (t.includes("ffmpeg")) return "FFmpeg merge error";
 
-  if (t.includes("http error 520")) return "Cloudflare 520";
-  if (t.includes("http error 521")) return "Cloudflare 521";
-  if (t.includes("http error 522")) return "Cloudflare 522";
-  if (t.includes("http error 523")) return "Cloudflare 523";
-  if (t.includes("http error 524")) return "Cloudflare 524";
-
   return "Unknown";
 }
 
 function detectReason(err) {
   const t = (err?._stderr || "") + "\n" + (err?._stdout || "");
   return detectReasonFromText(t);
+}
+
+/* ================= AUTO UPDATE yt-dlp ================= */
+async function ensureLatestYtDlp() {
+  if (YTDLP_UPDATED) return;
+  YTDLP_UPDATED = true;
+
+  if (String(process.env.AUTO_UPDATE_YTDLP || "1") === "0") return;
+
+  try {
+    // Nightly via pip --pre (good for broken extractors)
+    await execBin(
+      PYTHON_BIN,
+      ["-m", "pip", "install", "-U", "--pre", "yt-dlp[default]"],
+      "pip yt-dlp update"
+    );
+  } catch (e) {
+    console.log("⚠ yt-dlp update skipped:", e?.message || e);
+  }
+}
+
+/* ================= QUALITY PARSER ================= */
+function parseQualityAndUrl(q = "") {
+  const parts = String(q).trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return { quality: DEFAULT_QUALITY, url: "" };
+
+  let quality = DEFAULT_QUALITY;
+  let url = String(q).trim();
+
+  if (parts.length > 1) {
+    const first = parts[0].toLowerCase().replace("p", "");
+    const maybe = parseInt(first, 10);
+    if (ALLOWED_QUALITIES.includes(maybe)) {
+      quality = maybe;
+      url = parts.slice(1).join(" ");
+    }
+  }
+
+  if (quality > MAX_CAP_QUALITY) quality = MAX_CAP_QUALITY;
+  return { quality, url: String(url || "").trim() };
 }
 
 /* ================= METADATA GETTER (RETRY) ================= */
@@ -174,12 +201,178 @@ async function getMetadata(url) {
         return JSON.parse(stdout);
       } catch (e) {
         lastErr = e;
-        await sleep(700);
+        await sleep(600);
       }
     }
   }
 
   throw lastErr || new Error("Metadata failed");
+}
+
+/* ================= MP4/H264 HEIGHT PICKER ================= */
+function getPlayableMp4Heights(info) {
+  const fmts = Array.isArray(info?.formats) ? info.formats : [];
+  const heights = fmts
+    .filter((f) => f && f.height && String(f.ext || "").toLowerCase() === "mp4")
+    .filter((f) => {
+      const vc = String(f.vcodec || "").toLowerCase();
+      return vc.includes("avc1") || vc.includes("h264");
+    })
+    .map((f) => f.height);
+
+  return [...new Set(heights)].sort((a, b) => a - b);
+}
+
+/* ================= THUMB FIX (WHATSAPP MOBILE) ================= */
+async function downloadThumbJpg({ url, tempDir }) {
+  const outTpl = path.join(tempDir, "thumb.%(ext)s");
+
+  const args = [
+    "--skip-download",
+    "--write-thumbnail",
+    "--convert-thumbnails",
+    "jpg",
+    "--no-warnings",
+    "--no-playlist",
+
+    "--cookies",
+    COOKIE_FILE,
+    "--user-agent",
+    UA,
+    "--referer",
+    "https://www.eporner.com/",
+
+    "--ffmpeg-location",
+    ffmpegPath,
+
+    "-o",
+    outTpl,
+    url,
+  ];
+
+  try {
+    await runYtDlpPy(args, "EPORNER THUMB");
+  } catch {
+    return null;
+  }
+
+  const f = fs
+    .readdirSync(tempDir)
+    .find(
+      (x) =>
+        x.startsWith("thumb.") &&
+        (x.endsWith(".jpg") || x.endsWith(".jpeg") || x.endsWith(".png"))
+    );
+
+  return f ? path.join(tempDir, f) : null;
+}
+
+/* ================= FIND DOWNLOADED MP4 ================= */
+function findMp4InDir(tempDir) {
+  const files = fs.readdirSync(tempDir);
+  const mp4 = files.find(
+    (f) => f.endsWith(".mp4") && !f.includes(".part") && !f.includes(".ytdl")
+  );
+  return mp4 ? path.join(tempDir, mp4) : null;
+}
+
+/* ================= SPEED DOWNLOAD (aria2c + fallback) ================= */
+function ariaMissingReason(text = "") {
+  const t = String(text).toLowerCase();
+  return (
+    t.includes("aria2c") &&
+    (t.includes("not found") ||
+      t.includes("no such file") ||
+      t.includes("is not recognized") ||
+      t.includes("could not run"))
+  );
+}
+
+async function runDownloadWithFallback({ url, outputTemplate, formatRule }) {
+  const baseArgs = [
+    "--no-warnings",
+    "--no-playlist",
+
+    "--cookies",
+    COOKIE_FILE,
+    "--user-agent",
+    UA,
+    "--referer",
+    "https://www.eporner.com/",
+
+    "--retries",
+    "10",
+    "--fragment-retries",
+    "10",
+    "--socket-timeout",
+    "20",
+
+    "--concurrent-fragments",
+    CONCURRENT_FRAGMENTS,
+    "--http-chunk-size",
+    HTTP_CHUNK,
+
+    "--ffmpeg-location",
+    ffmpegPath,
+
+    "-f",
+    formatRule,
+    "--merge-output-format",
+    "mp4",
+
+    "-o",
+    outputTemplate,
+    url,
+  ];
+
+  // try aria2c first
+  if (USE_ARIA2C) {
+    const ariaArgs = [
+      ...baseArgs,
+      "--downloader",
+      "aria2c",
+      "--downloader-args",
+      `aria2c:-x ${ARIA_CONN} -s ${ARIA_CONN} -k 1M --file-allocation=none --summary-interval=0`,
+    ];
+
+    let logText = "";
+    const p = spawnYtDlpPy(ariaArgs);
+
+    p.stderr.on("data", (d) => {
+      logText += d.toString();
+      if (logText.length > 40000) logText = logText.slice(-40000);
+    });
+    p.stdout.on("data", (d) => {
+      logText += d.toString();
+      if (logText.length > 40000) logText = logText.slice(-40000);
+    });
+
+    const code = await new Promise((r) => p.on("close", r));
+    if (code === 0) return { ok: true, used: "aria2c", logText };
+
+    // aria missing -> fallback to native
+    if (!ariaMissingReason(logText)) {
+      return { ok: false, used: "aria2c", logText };
+    }
+    console.log("⚠ aria2c missing -> fallback to native downloader");
+  }
+
+  // fallback native
+  let logText = "";
+  const p2 = spawnYtDlpPy(baseArgs);
+
+  p2.stderr.on("data", (d) => {
+    logText += d.toString();
+    if (logText.length > 40000) logText = logText.slice(-40000);
+  });
+  p2.stdout.on("data", (d) => {
+    logText += d.toString();
+    if (logText.length > 40000) logText = logText.slice(-40000);
+  });
+
+  const code2 = await new Promise((r) => p2.on("close", r));
+  if (code2 === 0) return { ok: true, used: "native", logText };
+  return { ok: false, used: "native", logText };
 }
 
 /* ================= COMMAND ================= */
@@ -188,13 +381,12 @@ cmd(
     pattern: "eporner",
     ownerOnly: true,
     react: "💋",
-    desc: "Eporner downloader (360/480/720/1080, NO AV1 + AAC 320kbps)",
+    desc: "Eporner downloader (fast aria2c + silent, thumb fixed, H264 MP4 + AAC 320k)",
     category: "download",
     filename: __filename,
   },
   async (bot, msg, m, { from, q, reply }) => {
     let tempDir = null;
-    let outputFile = null;
 
     try {
       if (!q) {
@@ -209,45 +401,32 @@ cmd(
       }
 
       if (!ffmpegPath) {
-        return reply("❌ ffmpeg-static missing (needed for AAC 320kbps fix)");
-      }
-
-      // ✅ important: update yt-dlp in github workspace
-      await ensureLatestYtDlp();
-
-      // ================= QUALITY PARSER ================= //
-      let quality = 720;
-      let url = q.trim();
-
-      const parts = q.trim().split(/\s+/);
-      if (parts.length > 1) {
-        const first = parts[0].toLowerCase().replace("p", "");
-        if (["360", "480", "720", "1080"].includes(first)) {
-          quality = parseInt(first, 10);
-          url = parts.slice(1).join(" ");
-        }
-      }
-
-      if (!isValidEpornerUrl(url)) {
-        return reply("❌ Invalid URL. Please provide an eporner.com link.");
+        return reply("❌ ffmpeg-static missing (needed for thumb convert + AAC fix)");
       }
 
       if (!fs.existsSync(COOKIE_FILE)) {
         return reply("❌ *Cookie file missing*\nAdd: `/cookies/eporner.txt`");
       }
 
+      await ensureLatestYtDlp();
+
+      const parsed = parseQualityAndUrl(q);
+      let quality = parsed.quality;
+      const url = parsed.url;
+
+      if (!isValidEpornerUrl(url)) {
+        return reply("❌ Invalid URL. Please provide an eporner.com link.");
+      }
+
       tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "eporner-"));
-      outputFile = path.join(tempDir, `ep_${Date.now()}.mp4`);
 
-      // ================= METADATA ================= //
+      /* ================= METADATA ================= */
       let info = null;
-
       try {
         info = await getMetadata(url);
       } catch (e) {
         const reason = detectReason(e);
         const snippet = tailLines(e?._stderr || e?._stdout || "", 10);
-
         return reply(
           `❌ Metadata failed.\n🧠 Reason: *${reason}*\n\n` +
             `📌 Details:\n\`\`\`\n${snippet || "No output"}\n\`\`\``
@@ -260,7 +439,19 @@ cmd(
       const likes = info.like_count ? info.like_count.toLocaleString() : "N/A";
       const rating = info.average_rating || "N/A";
       const duration = info.duration_string || "N/A";
-      const thumbnail = info.thumbnail;
+
+      // choose max available mp4/h264 <= requested
+      const playableHeights = getPlayableMp4Heights(info);
+      const maxAvailable = playableHeights.length
+        ? Math.min(Math.max(...playableHeights), MAX_CAP_QUALITY)
+        : quality;
+
+      if (quality > maxAvailable) {
+        await reply(
+          `⚠ Requested ${quality}p not available (MP4/H.264). Downloading ${maxAvailable}p instead.`
+        );
+        quality = maxAvailable;
+      }
 
       const caption =
         `🎬 *${title}*\n` +
@@ -270,166 +461,112 @@ cmd(
         `⭐ Rating: ${rating}\n` +
         `⏳ Duration: ${duration}\n` +
         `🎥 Quality: *≤${quality}p*\n` +
-        `🎞 Video: *H.264 (No AV1)*\n` +
-        `🎧 Audio: *AAC ${FORCE_AUDIO_BITRATE}*\n\n` +
-        `📥 *Starting download…*`;
+        `🎞 Video: *H.264 (prefer avc1)*\n` +
+        `🎧 Audio Final: *AAC ${FORCE_AUDIO_BITRATE}*\n\n` +
+        `📥 *Downloading…*`;
 
-      if (thumbnail) {
-        try {
-          const tRes = await axios.get(thumbnail, { responseType: "arraybuffer", timeout: 20000 });
-          await bot.sendMessage(from, { image: Buffer.from(tRes.data), caption }, { quoted: msg });
-        } catch {
+      // ✅ send thumb (local) OR text (no progress spam)
+      if (SEND_THUMB) {
+        const thumbPath = await downloadThumbJpg({ url, tempDir });
+        if (thumbPath && fs.existsSync(thumbPath)) {
+          await bot.sendMessage(from, { image: { url: thumbPath }, caption }, { quoted: msg });
+        } else {
           await bot.sendMessage(from, { text: caption }, { quoted: msg });
         }
       } else {
         await bot.sendMessage(from, { text: caption }, { quoted: msg });
       }
 
-      // ================= DOWNLOAD (NO AV1) ================= //
+      /* ================= DOWNLOAD FAST (aria2c) ================= */
       const formatRule =
-        `bv*[ext=mp4][vcodec^=avc1][height<=${quality}]+` +
-        `ba[ext=m4a][acodec^=mp4a]/` +
+        `bv*[ext=mp4][vcodec^=avc1][height<=${quality}]+ba[ext=m4a][acodec^=mp4a]/` +
+        `bv*[ext=mp4][height<=${quality}]+ba[ext=m4a]/` +
         `b[ext=mp4][vcodec^=avc1][height<=${quality}]/` +
+        `b[ext=mp4][height<=${quality}]/` +
         `best[ext=mp4][height<=${quality}]`;
 
-      let progressMsg = null;
-      let lastUpdate = 0;
-      let stderrLog = "";
+      const outputTemplate = path.join(tempDir, `ep_%(id)s.%(ext)s`);
 
-      const ytdlpArgs = [
-        "--no-warnings",
-        "--newline",
-        "--no-playlist",
-        "--cookies",
-        COOKIE_FILE,
-        "--user-agent",
-        UA,
-        "--referer",
-        "https://www.eporner.com/",
-        "--retries",
-        "infinite",
-        "--fragment-retries",
-        "infinite",
-        "--socket-timeout",
-        "20",
-        "--concurrent-fragments",
-        "20",
-        "-f",
-        formatRule,
-        "--merge-output-format",
-        "mp4",
-        "-o",
-        outputFile,
+      const dl = await runDownloadWithFallback({
         url,
-      ];
-
-      const ytdlp = spawnYtDlpPy(ytdlpArgs);
-
-      ytdlp.stderr.on("data", async (data) => {
-        const text = data.toString().replace(/\r/g, "");
-        stderrLog += text;
-        if (stderrLog.length > 20000) stderrLog = stderrLog.slice(-20000);
-
-        const match = text.match(/(\d{1,3}\.\d+)%/);
-        if (!match) return;
-
-        const now = Date.now();
-
-        try {
-          if (!progressMsg) {
-            progressMsg = await bot.sendMessage(
-              from,
-              { text: `📥 Downloading…\n⏳ Progress: *${match[1]}%*` },
-              { quoted: msg }
-            );
-            lastUpdate = now;
-            return;
-          }
-
-          if (now - lastUpdate > 2500) {
-            lastUpdate = now;
-            await bot.sendMessage(
-              from,
-              { text: `📥 Downloading…\n⏳ Progress: *${match[1]}%*`, edit: progressMsg.key },
-              { quoted: msg }
-            );
-          }
-        } catch {
-          // ignore edit errors
-        }
+        outputTemplate,
+        formatRule,
       });
 
-      const exitCode = await new Promise((resolve) => {
-        ytdlp.on("close", (code) => resolve(code));
-        ytdlp.on("error", () => resolve(1));
-      });
+      const downloadedMp4 = findMp4InDir(tempDir);
 
-      if (exitCode !== 0 || !fs.existsSync(outputFile)) {
-        const reason = detectReasonFromText(stderrLog);
-        const snippet = tailLines(stderrLog, 10);
-
-        if (tempDir && fs.existsSync(tempDir)) {
-          fs.rmSync(tempDir, { recursive: true, force: true });
-        }
-
+      if (!dl.ok || !downloadedMp4 || !fs.existsSync(downloadedMp4)) {
+        const reason = detectReasonFromText(dl.logText || "");
+        const snippet = tailLines(dl.logText || "", 12);
         return reply(
-          `❌ *Download failed*\n🧠 Reason: *${reason}*\n\n` +
+          `❌ *Download failed* (${dl.used})\n🧠 Reason: *${reason}*\n\n` +
             `📌 Details:\n\`\`\`\n${snippet || "No output"}\n\`\`\``
         );
       }
 
-      const sizeBytes = fs.statSync(outputFile).size;
+      const sizeBytes = fs.statSync(downloadedMp4).size;
       if (sizeBytes < 300 * 1024) {
-        const reason = detectReasonFromText(stderrLog);
-        const snippet = tailLines(stderrLog, 10);
-
-        if (tempDir && fs.existsSync(tempDir)) {
-          fs.rmSync(tempDir, { recursive: true, force: true });
-        }
-
+        const reason = detectReasonFromText(dl.logText || "");
+        const snippet = tailLines(dl.logText || "", 12);
         return reply(
           `❌ *Download failed (empty file)*\n🧠 Reason: *${reason}*\n\n` +
             `📌 Details:\n\`\`\`\n${snippet || "No output"}\n\`\`\``
         );
       }
 
-      /* ================= AUDIO FIX (AAC 320k) ================= */
-      const fixedFile = path.join(tempDir, `fixed_${Date.now()}.mp4`);
-      let sendPath = outputFile;
+      /* ================= AUDIO FIX (optional for speed) ================= */
+      let sendPath = downloadedMp4;
 
-      try {
-        await execBin(
-          ffmpegPath,
-          [
-            "-y",
-            "-i",
-            outputFile,
-            "-c:v",
-            "copy",
-            "-c:a",
-            "aac",
-            "-b:a",
-            FORCE_AUDIO_BITRATE,
-            "-movflags",
-            "+faststart",
-            fixedFile,
-          ],
-          "FFmpeg AUDIO 320K"
-        );
+      if (DO_AUDIO_FIX) {
+        const fixedFile = path.join(tempDir, `fixed_${Date.now()}.mp4`);
+        try {
+          await execBin(
+            ffmpegPath,
+            [
+              "-y",
+              "-i",
+              downloadedMp4,
 
-        if (fs.existsSync(fixedFile) && fs.statSync(fixedFile).size > 300 * 1024) {
-          sendPath = fixedFile;
+              "-map",
+              "0:v:0",
+              "-map",
+              "0:a:0?",
+
+              "-c:v",
+              "copy",
+              "-c:a",
+              "aac",
+              "-b:a",
+              FORCE_AUDIO_BITRATE,
+              "-ac",
+              "2",
+              "-ar",
+              "44100",
+
+              "-movflags",
+              "+faststart",
+              "-shortest",
+
+              fixedFile,
+            ],
+            "FFmpeg AUDIO 320K"
+          );
+
+          if (fs.existsSync(fixedFile) && fs.statSync(fixedFile).size > 300 * 1024) {
+            sendPath = fixedFile;
+          }
+        } catch {
+          console.log("⚠ FFmpeg audio fix failed, sending original...");
         }
-      } catch {
-        console.log("⚠ FFmpeg audio fix failed, sending original...");
       }
 
       const sizeMB = (fs.statSync(sendPath).size / 1048576).toFixed(2);
 
+      /* ================= SEND (Actions safe: NO readFileSync) ================= */
       await bot.sendMessage(
         from,
         {
-          document: fs.readFileSync(sendPath),
+          document: { url: sendPath },
           fileName: `${safeFileName(title)}_${quality}p.mp4`,
           mimetype: "video/mp4",
           caption:
@@ -441,20 +578,15 @@ cmd(
         },
         { quoted: msg }
       );
-
-      if (tempDir && fs.existsSync(tempDir)) {
-        fs.rmSync(tempDir, { recursive: true, force: true });
-      }
     } catch (err) {
       console.error("EPORNER ERROR:", err);
-
+      reply("❌ Error: " + (err.message || "unknown"));
+    } finally {
       try {
         if (tempDir && fs.existsSync(tempDir)) {
           fs.rmSync(tempDir, { recursive: true, force: true });
         }
       } catch {}
-
-      reply("❌ Error: " + (err.message || "unknown"));
     }
   }
 );
